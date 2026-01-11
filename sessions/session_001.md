@@ -116,6 +116,16 @@ Démarrage d'un nouveau projet : Client de synchronisation SMB multi-plateforme 
   - Output console et fichier
   - Format JSON structuré
 
+### 10. Documentation de l'installeur Windows
+- **docs/INSTALLER.md**: Documentation complète pour créer l'installeur .exe
+  - Comparaison des technologies (NSIS, WiX, Inno Setup, Advanced Installer)
+  - Choix final: NSIS (gratuit, populaire, bien documenté)
+  - Fonctionnalités requises (installation, désinstallation, raccourcis, démarrage auto)
+  - Script NSIS complet avec exemples
+  - Automatisation avec GitHub Actions
+  - Tests et signature de code
+- **build/README.md**: Structure du répertoire de build et instructions
+
 ---
 
 ## Problèmes rencontrés
@@ -237,8 +247,8 @@ Le projet suit une architecture modulaire claire avec séparation:
 
 ## Métriques
 
-- **Nombre de fichiers créés**: 16
-  - Documentation: 5 (README, LICENSE, .gitignore, CHANGELOG, INSTALLATION)
+- **Nombre de fichiers créés**: 18
+  - Documentation: 7 (README, LICENSE, .gitignore, CHANGELOG, INSTALLATION, docs/INSTALLER, build/README)
   - Configuration: 3 (go.mod, default_config.yaml, default_exclusions.json)
   - Code Go: 5 (main.go, config.go, db.go, models.go, logger.go)
   - Database: 1 (schema.sql)
@@ -257,7 +267,11 @@ Le projet suit une architecture modulaire claire avec séparation:
 
 - **Lignes de configuration**: ~150 lignes (YAML + JSON)
 
-- **Documentation**: ~600 lignes (README + INSTALLATION + autres)
+- **Documentation**: ~1100 lignes
+  - README.md: ~170 lignes
+  - INSTALLATION.md: ~350 lignes
+  - docs/INSTALLER.md: ~550 lignes
+  - Autres: ~30 lignes
 
 - **Temps de la session**: ~1 heure
 
