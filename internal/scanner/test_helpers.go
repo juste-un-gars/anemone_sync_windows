@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/juste-un-gars/anemone_sync_windows/internal/database"
 	"go.uber.org/zap"
@@ -179,12 +180,13 @@ func (h *TestHelpers) SetupTestDB() *database.DB {
 func (h *TestHelpers) CreateTestJob(db *database.DB, localPath, remotePath string) int64 {
 	h.t.Helper()
 
+	now := time.Now().Unix()
 	result, err := db.Conn().Exec(`
 		INSERT INTO sync_jobs (
 			name, local_path, remote_path, server_credential_id,
-			sync_mode, trigger_mode, enabled
-		) VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, "Test Job", localPath, remotePath, "test_cred", "mirror", "manual", true)
+			sync_mode, trigger_mode, enabled, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, "Test Job", localPath, remotePath, "test_cred", "mirror", "manual", true, now, now)
 
 	if err != nil {
 		h.t.Fatalf("failed to create test job: %v", err)

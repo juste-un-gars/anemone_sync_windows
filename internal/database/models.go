@@ -23,18 +23,18 @@ type SyncJob struct {
 
 // FileState représente l'état d'un fichier synchronisé
 type FileState struct {
-	ID           int64     `json:"id"`
-	JobID        int64     `json:"job_id"`
-	LocalPath    string    `json:"local_path"`
-	RemotePath   string    `json:"remote_path"`
-	Size         int64     `json:"size"`
-	MTime        time.Time `json:"mtime"` // Timestamp de modification
-	Hash         string    `json:"hash,omitempty"` // SHA256
-	LastSync     *time.Time `json:"last_sync,omitempty"`
-	SyncStatus   string    `json:"sync_status"` // idle, syncing, error, queued
-	ErrorMessage string    `json:"error_message,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID           int64   `json:"id"`
+	JobID        int64   `json:"job_id"`
+	LocalPath    string  `json:"local_path"`
+	RemotePath   string  `json:"remote_path"`
+	Size         int64   `json:"size"`
+	MTime        int64   `json:"mtime"` // Unix timestamp de modification
+	Hash         string  `json:"hash,omitempty"` // SHA256 (empty if not computed)
+	LastSync     *int64  `json:"last_sync,omitempty"` // Unix timestamp
+	SyncStatus   string  `json:"sync_status"` // idle, syncing, error, queued
+	ErrorMessage *string `json:"error_message,omitempty"`
+	CreatedAt    int64   `json:"created_at"` // Unix timestamp
+	UpdatedAt    int64   `json:"updated_at"` // Unix timestamp
 }
 
 // Exclusion représente une règle d'exclusion

@@ -60,6 +60,14 @@ func (w *Walker) Walk(jobID int64, basePath string, walkFn WalkFunc) error {
 	// Clean the base path
 	basePath = filepath.Clean(basePath)
 
+	// Check if base path exists
+	if _, err := os.Stat(basePath); err != nil {
+		if os.IsNotExist(err) {
+			return WrapError(ErrFileNotFound, "directory does not exist: %s", basePath)
+		}
+		return WrapError(ErrAccessDenied, "cannot access directory: %s", basePath)
+	}
+
 	w.logger.Info("starting directory walk",
 		zap.Int64("job_id", jobID),
 		zap.String("base_path", basePath))

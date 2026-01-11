@@ -31,7 +31,7 @@ func TestWalker_BasicWalk(t *testing.T) {
 
 	stats := walker.GetStatistics()
 	h.AssertEqual(3, stats.TotalFiles, "total files in stats")
-	h.AssertEqual(1, stats.TotalDirs, "total dirs in stats (subdir)")
+	h.AssertEqual(2, stats.TotalDirs, "total dirs in stats (tempDir + subdir)")
 }
 
 func TestWalker_ExcludedDirectory(t *testing.T) {

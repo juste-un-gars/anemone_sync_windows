@@ -250,7 +250,7 @@ func (s *Scanner) Scan(ctx context.Context, req ScanRequest) (*ScanResult, error
 			LocalPath:  fileInfo.LocalPath,
 			RemotePath: fileInfo.RemotePath,
 			Size:       fileInfo.Size,
-			MTime:      fileInfo.MTime,
+			MTime:      fileInfo.MTime.Unix(),
 			Hash:       fileInfo.Hash,
 			SyncStatus: "idle",
 		}
@@ -347,7 +347,7 @@ func (s *Scanner) processFile(ctx context.Context, req ScanRequest, path string,
 	// Step 2: Quick comparison (size + mtime)
 	dbMetadata := &FileMetadata{
 		Size:  dbState.Size,
-		MTime: dbState.MTime,
+		MTime: time.Unix(dbState.MTime, 0),
 	}
 	if SameMetadata(metadata, dbMetadata) {
 		// Unchanged (same size + mtime)
@@ -468,7 +468,7 @@ func (s *Scanner) detectDeletedFiles(jobID int64, foundFiles map[string]bool) ([
 				LocalPath:  state.LocalPath,
 				RemotePath: state.RemotePath,
 				Size:       state.Size,
-				MTime:      state.MTime,
+				MTime:      time.Unix(state.MTime, 0),
 				Hash:       state.Hash,
 				Status:     StatusDeleted,
 			})

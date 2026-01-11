@@ -68,14 +68,18 @@ func TestWorkerPool_ConcurrentProcessing(t *testing.T) {
 	err := pool.Start()
 	h.AssertNoError(err, "start pool")
 
-	// Submit 100 jobs
+	// Submit 100 jobs in goroutine
 	jobCount := 100
-	for i := 0; i < jobCount; i++ {
-		err := pool.Submit(i)
-		h.AssertNoError(err, "submit job")
-	}
-
-	pool.Close()
+	go func() {
+		for i := 0; i < jobCount; i++ {
+			err := pool.Submit(i)
+			if err != nil {
+				t.Errorf("submit job %d: %v", i, err)
+			}
+		}
+		// Close job queue after all jobs submitted
+		pool.Close()
+	}()
 
 	// Wait for all results
 	resultCount := 0
@@ -108,7 +112,10 @@ func TestWorkerPool_ErrorHandling(t *testing.T) {
 		pool.Submit(i)
 	}
 
-	pool.Close()
+	// Close job queue in goroutine
+	go func() {
+		pool.Close()
+	}()
 
 	// Collect results and count errors
 	successCount := 0
@@ -153,7 +160,11 @@ func TestWorkerPool_Cancel(t *testing.T) {
 
 	// Cancel the pool
 	pool.Cancel()
-	pool.Close()
+
+	// Close job queue in goroutine
+	go func() {
+		pool.Close()
+	}()
 
 	// Drain results
 	for range pool.Results() {
@@ -263,7 +274,10 @@ func TestWorkerPool_SubmitBatch(t *testing.T) {
 	err = pool.SubmitBatch(jobs)
 	h.AssertNoError(err, "submit batch")
 
-	pool.Close()
+	// Close job queue in goroutine
+	go func() {
+		pool.Close()
+	}()
 
 	// Count results
 	resultCount := 0

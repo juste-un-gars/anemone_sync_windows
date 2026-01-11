@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	_ "github.com/mutecomm/go-sqlcipher/v4"
 )
@@ -188,6 +189,9 @@ func (db *DB) SetMetadata(key, value string) error {
 // GetFileState retrieves file state from database
 func (db *DB) GetFileState(jobID int64, localPath string) (*FileState, error) {
 	var state FileState
+	var hash, errorMsg sql.NullString
+	var lastSync sql.NullInt64
+
 	err := db.conn.QueryRow(`
 		SELECT id, job_id, local_path, remote_path, size, mtime, hash,
 		       last_sync, sync_status, error_message, created_at, updated_at
@@ -200,10 +204,10 @@ func (db *DB) GetFileState(jobID int64, localPath string) (*FileState, error) {
 		&state.RemotePath,
 		&state.Size,
 		&state.MTime,
-		&state.Hash,
-		&state.LastSync,
+		&hash,
+		&lastSync,
 		&state.SyncStatus,
-		&state.ErrorMessage,
+		&errorMsg,
 		&state.CreatedAt,
 		&state.UpdatedAt,
 	)
@@ -215,14 +219,24 @@ func (db *DB) GetFileState(jobID int64, localPath string) (*FileState, error) {
 		return nil, fmt.Errorf("query file state: %w", err)
 	}
 
+	// Convert sql.Null* types
+	state.Hash = hash.String // Empty string if NULL
+	if lastSync.Valid {
+		state.LastSync = &lastSync.Int64
+	}
+	if errorMsg.Valid {
+		state.ErrorMessage = &errorMsg.String
+	}
+
 	return &state, nil
 }
 
 // UpsertFileState inserts or updates a file state
 func (db *DB) UpsertFileState(state *FileState) error {
+	now := time.Now().Unix()
 	_, err := db.conn.Exec(`
-		INSERT INTO files_state (job_id, local_path, remote_path, size, mtime, hash, sync_status)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO files_state (job_id, local_path, remote_path, size, mtime, hash, sync_status, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(job_id, local_path)
 		DO UPDATE SET
 			remote_path = excluded.remote_path,
@@ -230,8 +244,8 @@ func (db *DB) UpsertFileState(state *FileState) error {
 			mtime = excluded.mtime,
 			hash = excluded.hash,
 			sync_status = excluded.sync_status,
-			updated_at = CURRENT_TIMESTAMP
-	`, state.JobID, state.LocalPath, state.RemotePath, state.Size, state.MTime, state.Hash, state.SyncStatus)
+			updated_at = excluded.updated_at
+	`, state.JobID, state.LocalPath, state.RemotePath, state.Size, state.MTime, state.Hash, state.SyncStatus, now, now)
 
 	if err != nil {
 		return fmt.Errorf("upsert file state: %w", err)
@@ -246,9 +260,10 @@ func (db *DB) BulkUpdateFileStates(states []*FileState) error {
 	}
 
 	return db.Transaction(func(tx *sql.Tx) error {
+		now := time.Now().Unix()
 		stmt, err := tx.Prepare(`
-			INSERT INTO files_state (job_id, local_path, remote_path, size, mtime, hash, sync_status)
-			VALUES (?, ?, ?, ?, ?, ?, ?)
+			INSERT INTO files_state (job_id, local_path, remote_path, size, mtime, hash, sync_status, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(job_id, local_path)
 			DO UPDATE SET
 				remote_path = excluded.remote_path,
@@ -256,7 +271,7 @@ func (db *DB) BulkUpdateFileStates(states []*FileState) error {
 				mtime = excluded.mtime,
 				hash = excluded.hash,
 				sync_status = excluded.sync_status,
-				updated_at = CURRENT_TIMESTAMP
+				updated_at = excluded.updated_at
 		`)
 		if err != nil {
 			return fmt.Errorf("prepare statement: %w", err)
@@ -264,7 +279,7 @@ func (db *DB) BulkUpdateFileStates(states []*FileState) error {
 		defer stmt.Close()
 
 		for _, state := range states {
-			_, err := stmt.Exec(state.JobID, state.LocalPath, state.RemotePath, state.Size, state.MTime, state.Hash, state.SyncStatus)
+			_, err := stmt.Exec(state.JobID, state.LocalPath, state.RemotePath, state.Size, state.MTime, state.Hash, state.SyncStatus, now, now)
 			if err != nil {
 				return fmt.Errorf("execute statement for %s: %w", state.LocalPath, err)
 			}
@@ -290,6 +305,9 @@ func (db *DB) GetAllFileStates(jobID int64) ([]*FileState, error) {
 	var states []*FileState
 	for rows.Next() {
 		var state FileState
+		var hash, errorMsg sql.NullString
+		var lastSync sql.NullInt64
+
 		err := rows.Scan(
 			&state.ID,
 			&state.JobID,
@@ -297,16 +315,26 @@ func (db *DB) GetAllFileStates(jobID int64) ([]*FileState, error) {
 			&state.RemotePath,
 			&state.Size,
 			&state.MTime,
-			&state.Hash,
-			&state.LastSync,
+			&hash,
+			&lastSync,
 			&state.SyncStatus,
-			&state.ErrorMessage,
+			&errorMsg,
 			&state.CreatedAt,
 			&state.UpdatedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scan file state: %w", err)
 		}
+
+		// Convert sql.Null* types
+		state.Hash = hash.String // Empty string if NULL
+		if lastSync.Valid {
+			state.LastSync = &lastSync.Int64
+		}
+		if errorMsg.Valid {
+			state.ErrorMessage = &errorMsg.String
+		}
+
 		states = append(states, &state)
 	}
 

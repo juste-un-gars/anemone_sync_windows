@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
@@ -191,7 +192,7 @@ func TestHasher_ConcurrentHashing(t *testing.T) {
 	// Create multiple test files
 	files := make([]string, 10)
 	for i := 0; i < 10; i++ {
-		files[i] = h.CreateTestFileWithSize(tempDir+"/concurrent_"+string(rune(i))+".bin", 1*1024*1024)
+		files[i] = h.CreateTestFileWithSize(fmt.Sprintf("%s/concurrent_%d.bin", tempDir, i), 1*1024*1024)
 	}
 
 	hasher := NewHasher("sha256", 4, h.GetTestLogger(false))

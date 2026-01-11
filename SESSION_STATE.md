@@ -27,6 +27,18 @@ Ce fichier contient un résumé très court de chaque session de développement.
 **Prochaines étapes**: Phase 2 Client SMB + Cache Intelligent
 **Détails**: sessions/session_002.md
 
+## Session 003 - 2026-01-11
+**Status**: ✅ Terminée (prêt à commiter)
+**Durée**: ~2h
+**Phase**: Phase 1 Scanner (finalisation tests + DB fixes)
+**Réalisations**: 97% tests passent (61/63), coverage 73%
+**Corrections**: Worker pool deadlock, DB timestamps, NULL handling, types time.Time→int64
+**Tests**: Worker pool 13/13 ✅, Hash 13/13 ✅, Walker 11/11 ✅
+**Bugs Résolus**: 8 bugs majeurs (deadlock, constraints, type mismatch, NULL scan)
+**Restant**: 2 tests (exclusions + cancellation context)
+**Prochaines étapes**: Finaliser 2 tests restants (~30 min) puis Phase 2 Client SMB
+**Détails**: sessions/session_003.md
+
 ---
 
 ## Instructions de maintenance
