@@ -34,11 +34,23 @@ Ce fichier contient un résumé très court de chaque session de développement.
 **Réalisations**: 97% tests passent (61/63), coverage 73%
 **Corrections**: Worker pool deadlock, DB timestamps, NULL handling, types time.Time→int64
 **Tests**: Worker pool 13/13 ✅, Hash 13/13 ✅, Walker 11/11 ✅
-**Bugs Résolus**: 8 bugs majeurs (deadlock, constraints, type mismatch, NULL scan)
+**Bugs Résolés**: 8 bugs majeurs (deadlock, constraints, type mismatch, NULL scan)
 **Commit**: f360853 "test(scanner): Fix worker pool tests and database issues"
 **Restant**: 2 tests (exclusions + cancellation context)
 **Prochaines étapes**: Finaliser 2 tests restants (~30 min) puis Phase 2 Client SMB
 **Détails**: sessions/session_003.md
+
+## Session 004 - 2026-01-11
+**Status**: ✅ Terminée
+**Durée**: ~30 min
+**Phase**: Phase 1 Scanner (100% complète ✅)
+**Réalisations**: 100% tests passent (63/63 ✅)
+**Corrections**:
+- Default exclusions loading (multi-path search)
+- Context cancellation error propagation in Walker
+**Tests**: Tous les tests passent, Phase 1 100% fonctionnelle
+**Fichiers modifiés**: scanner.go, walker.go
+**Prochaines étapes**: Phase 2 Client SMB + Cache Intelligent
 
 ---
 

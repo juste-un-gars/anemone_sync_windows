@@ -108,11 +108,26 @@ func NewScanner(cfg *config.Config, db *database.DB, logger *zap.Logger) (*Scann
 
 	// Create excluder and load default exclusions
 	excluder := NewExcluder(logger)
-	defaultExclusionsPath := filepath.Join(cfg.Paths.ConfigDir, "..", "configs", "default_exclusions.json")
-	if err := excluder.LoadDefaultExclusions(defaultExclusionsPath); err != nil {
-		logger.Warn("failed to load default exclusions",
-			zap.String("path", defaultExclusionsPath),
-			zap.Error(err))
+
+	// Try multiple locations for default_exclusions.json
+	defaultExclusionsPaths := []string{
+		filepath.Join(cfg.Paths.ConfigDir, "..", "configs", "default_exclusions.json"),
+		"configs/default_exclusions.json",                   // From project root
+		"../../configs/default_exclusions.json",             // From internal/scanner
+		"../../../configs/default_exclusions.json",          // From test subdirectory
+	}
+
+	loaded := false
+	for _, path := range defaultExclusionsPaths {
+		if err := excluder.LoadDefaultExclusions(path); err == nil {
+			logger.Debug("loaded default exclusions", zap.String("path", path))
+			loaded = true
+			break
+		}
+	}
+
+	if !loaded {
+		logger.Warn("could not load default exclusions from any location")
 		// Continue without default exclusions
 	}
 

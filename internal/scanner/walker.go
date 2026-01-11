@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -162,6 +163,10 @@ func (w *Walker) Walk(jobID int64, basePath string, walkFn WalkFunc) error {
 			if err := walkFn(path, metadata); err != nil {
 				if err == filepath.SkipDir {
 					return filepath.SkipDir
+				}
+				// Propagate critical errors (scan aborted, context canceled)
+				if errors.Is(err, ErrScanAborted) {
+					return err
 				}
 				w.stats.Errors++
 				w.logger.Warn("walk function error",
