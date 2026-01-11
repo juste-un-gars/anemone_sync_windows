@@ -41,7 +41,7 @@ Ce fichier contient un résumé très court de chaque session de développement.
 **Détails**: sessions/session_003.md
 
 ## Session 004 - 2026-01-11
-**Status**: ✅ Terminée
+**Status**: ✅ Terminée (commité)
 **Durée**: ~30 min
 **Phase**: Phase 1 Scanner (100% complète ✅)
 **Réalisations**: 100% tests passent (63/63 ✅)
@@ -50,7 +50,22 @@ Ce fichier contient un résumé très court de chaque session de développement.
 - Context cancellation error propagation in Walker
 **Tests**: Tous les tests passent, Phase 1 100% fonctionnelle
 **Fichiers modifiés**: scanner.go, walker.go
+**Commit**: dad73a1 "fix(scanner): Fix remaining tests - Phase 1 complete"
 **Prochaines étapes**: Phase 2 Client SMB + Cache Intelligent
+
+## Session 005 - 2026-01-11
+**Status**: ✅ Terminée (commité)
+**Durée**: ~1h
+**Phase**: Phase 2 Client SMB (Paliers 1-2)
+**Réalisations**:
+- **Palier 1**: Connection management (Connect/Disconnect/IsConnected)
+- **Palier 2**: File operations (Download/Upload avec auto-création dossiers)
+**Dependencies**: go-smb2 v1.1.0, golang.org/x/crypto v0.16.0
+**Tests**: 12/12 passent ✅
+**Fichiers créés**: internal/smb/client.go (326 lignes), client_test.go (225 lignes)
+**Commit**: 9c5b175 "feat(smb): Add SMB client with Download/Upload"
+**Restant**: Palier 3 (ListRemote, GetMetadata, Delete)
+**Prochaines étapes**: Paliers 3-4 puis authentification sécurisée (keyring)
 
 ---
 
