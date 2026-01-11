@@ -12,8 +12,19 @@ Ce fichier contient un résumé très court de chaque session de développement.
 **Infrastructure**: CI/CD 6 jobs, Makefile 15+ commandes, golangci-lint, Dependabot, templates GitHub
 **Documentation**: README, INSTALLATION, CONTRIBUTING, SECURITY, CODE_OF_CONDUCT, INSTALLER, CHECKLIST
 **Commits**: 4 (Phase 0, LICENSE, Infrastructure, Checklist)
-**Prochaines étapes**: Installer Go → Phase 1 (Scanner)
 **Détails**: sessions/session_001.md
+
+## Session 002 - 2026-01-11
+**Status**: ⏸️ En pause (96% complet)
+**Durée**: ~3h
+**Phase**: Phase 1 Scanner (code + tests)
+**Réalisations**: 15 fichiers, ~4100 lignes (Scanner: 1600, Tests: 2500)
+**Modules**: errors, metadata, hash, exclusion, walker, worker, scanner (7/7 ✅)
+**Tests**: 65+ tests unitaires, intégration, benchmarks créés
+**DB Extensions**: 7 méthodes ajoutées pour scanner
+**État**: Code compile, quelques tests worker pool à corriger
+**Prochaines étapes**: Finaliser tests worker pool → Phase 2 (Client SMB)
+**Détails**: sessions/session_002.md
 
 ---
 

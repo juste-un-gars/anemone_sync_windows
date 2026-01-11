@@ -182,3 +182,215 @@ func (db *DB) SetMetadata(key, value string) error {
 	}
 	return nil
 }
+
+// --- Scanner-specific methods ---
+
+// GetFileState retrieves file state from database
+func (db *DB) GetFileState(jobID int64, localPath string) (*FileState, error) {
+	var state FileState
+	err := db.conn.QueryRow(`
+		SELECT id, job_id, local_path, remote_path, size, mtime, hash,
+		       last_sync, sync_status, error_message, created_at, updated_at
+		FROM files_state
+		WHERE job_id = ? AND local_path = ?
+	`, jobID, localPath).Scan(
+		&state.ID,
+		&state.JobID,
+		&state.LocalPath,
+		&state.RemotePath,
+		&state.Size,
+		&state.MTime,
+		&state.Hash,
+		&state.LastSync,
+		&state.SyncStatus,
+		&state.ErrorMessage,
+		&state.CreatedAt,
+		&state.UpdatedAt,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("file state not found for job %d path %s", jobID, localPath)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("query file state: %w", err)
+	}
+
+	return &state, nil
+}
+
+// UpsertFileState inserts or updates a file state
+func (db *DB) UpsertFileState(state *FileState) error {
+	_, err := db.conn.Exec(`
+		INSERT INTO files_state (job_id, local_path, remote_path, size, mtime, hash, sync_status)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(job_id, local_path)
+		DO UPDATE SET
+			remote_path = excluded.remote_path,
+			size = excluded.size,
+			mtime = excluded.mtime,
+			hash = excluded.hash,
+			sync_status = excluded.sync_status,
+			updated_at = CURRENT_TIMESTAMP
+	`, state.JobID, state.LocalPath, state.RemotePath, state.Size, state.MTime, state.Hash, state.SyncStatus)
+
+	if err != nil {
+		return fmt.Errorf("upsert file state: %w", err)
+	}
+	return nil
+}
+
+// BulkUpdateFileStates updates multiple file states in a single transaction
+func (db *DB) BulkUpdateFileStates(states []*FileState) error {
+	if len(states) == 0 {
+		return nil
+	}
+
+	return db.Transaction(func(tx *sql.Tx) error {
+		stmt, err := tx.Prepare(`
+			INSERT INTO files_state (job_id, local_path, remote_path, size, mtime, hash, sync_status)
+			VALUES (?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(job_id, local_path)
+			DO UPDATE SET
+				remote_path = excluded.remote_path,
+				size = excluded.size,
+				mtime = excluded.mtime,
+				hash = excluded.hash,
+				sync_status = excluded.sync_status,
+				updated_at = CURRENT_TIMESTAMP
+		`)
+		if err != nil {
+			return fmt.Errorf("prepare statement: %w", err)
+		}
+		defer stmt.Close()
+
+		for _, state := range states {
+			_, err := stmt.Exec(state.JobID, state.LocalPath, state.RemotePath, state.Size, state.MTime, state.Hash, state.SyncStatus)
+			if err != nil {
+				return fmt.Errorf("execute statement for %s: %w", state.LocalPath, err)
+			}
+		}
+
+		return nil
+	})
+}
+
+// GetAllFileStates retrieves all file states for a job
+func (db *DB) GetAllFileStates(jobID int64) ([]*FileState, error) {
+	rows, err := db.conn.Query(`
+		SELECT id, job_id, local_path, remote_path, size, mtime, hash,
+		       last_sync, sync_status, error_message, created_at, updated_at
+		FROM files_state
+		WHERE job_id = ?
+	`, jobID)
+	if err != nil {
+		return nil, fmt.Errorf("query file states: %w", err)
+	}
+	defer rows.Close()
+
+	var states []*FileState
+	for rows.Next() {
+		var state FileState
+		err := rows.Scan(
+			&state.ID,
+			&state.JobID,
+			&state.LocalPath,
+			&state.RemotePath,
+			&state.Size,
+			&state.MTime,
+			&state.Hash,
+			&state.LastSync,
+			&state.SyncStatus,
+			&state.ErrorMessage,
+			&state.CreatedAt,
+			&state.UpdatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan file state: %w", err)
+		}
+		states = append(states, &state)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate file states: %w", err)
+	}
+
+	return states, nil
+}
+
+// GetExclusions retrieves all exclusions for a job (global + job-specific)
+func (db *DB) GetExclusions(jobID int64) ([]*Exclusion, error) {
+	rows, err := db.conn.Query(`
+		SELECT id, type, pattern_or_path, reason, date_added, job_id, created_at
+		FROM exclusions
+		WHERE type = 'global' OR (type = 'job' AND job_id = ?)
+		ORDER BY type DESC, id ASC
+	`, jobID)
+	if err != nil {
+		return nil, fmt.Errorf("query exclusions: %w", err)
+	}
+	defer rows.Close()
+
+	var exclusions []*Exclusion
+	for rows.Next() {
+		var excl Exclusion
+		err := rows.Scan(
+			&excl.ID,
+			&excl.Type,
+			&excl.PatternOrPath,
+			&excl.Reason,
+			&excl.DateAdded,
+			&excl.JobID,
+			&excl.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan exclusion: %w", err)
+		}
+		exclusions = append(exclusions, &excl)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate exclusions: %w", err)
+	}
+
+	return exclusions, nil
+}
+
+// GetIndividualExclusions retrieves individual path exclusions for a job
+func (db *DB) GetIndividualExclusions(jobID int64) (map[string]bool, error) {
+	rows, err := db.conn.Query(`
+		SELECT pattern_or_path
+		FROM exclusions
+		WHERE type = 'individual' AND job_id = ?
+	`, jobID)
+	if err != nil {
+		return nil, fmt.Errorf("query individual exclusions: %w", err)
+	}
+	defer rows.Close()
+
+	paths := make(map[string]bool)
+	for rows.Next() {
+		var path string
+		if err := rows.Scan(&path); err != nil {
+			return nil, fmt.Errorf("scan individual exclusion: %w", err)
+		}
+		paths[path] = true
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate individual exclusions: %w", err)
+	}
+
+	return paths, nil
+}
+
+// DeleteFileState deletes a file state (for deleted files)
+func (db *DB) DeleteFileState(jobID int64, localPath string) error {
+	_, err := db.conn.Exec(`
+		DELETE FROM files_state
+		WHERE job_id = ? AND local_path = ?
+	`, jobID, localPath)
+	if err != nil {
+		return fmt.Errorf("delete file state: %w", err)
+	}
+	return nil
+}
