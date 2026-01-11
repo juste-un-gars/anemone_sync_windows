@@ -15,15 +15,16 @@ Ce fichier contient un résumé très court de chaque session de développement.
 **Détails**: sessions/session_001.md
 
 ## Session 002 - 2026-01-11
-**Status**: ⏸️ En pause (96% complet)
+**Status**: ✅ Terminée (commité)
 **Durée**: ~3h
 **Phase**: Phase 1 Scanner (code + tests)
 **Réalisations**: 15 fichiers, ~4100 lignes (Scanner: 1600, Tests: 2500)
 **Modules**: errors, metadata, hash, exclusion, walker, worker, scanner (7/7 ✅)
 **Tests**: 65+ tests unitaires, intégration, benchmarks créés
 **DB Extensions**: 7 méthodes ajoutées pour scanner
-**État**: Code compile, quelques tests worker pool à corriger
-**Prochaines étapes**: Finaliser tests worker pool → Phase 2 (Client SMB)
+**Commit**: 1929806 "feat(scanner): Implement Phase 1 File Scanner"
+**Architecture Décidée**: OneDrive-like avec client SMB intégré (Option B)
+**Prochaines étapes**: Phase 2 Client SMB + Cache Intelligent
 **Détails**: sessions/session_002.md
 
 ---
