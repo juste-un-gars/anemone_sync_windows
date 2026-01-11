@@ -1,0 +1,34 @@
+{
+  "version": "1.0",
+  "global_patterns": [
+    "*.tmp",
+    "*.temp",
+    "~$*",
+    ".DS_Store",
+    "Thumbs.db",
+    "desktop.ini",
+    "~lock.*",
+    ".git/",
+    ".svn/",
+    ".hg/",
+    ".bzr/",
+    "node_modules/",
+    "__pycache__/",
+    ".venv/",
+    "venv/",
+    ".env",
+    "*.swp",
+    "*.swo",
+    "*~"
+  ],
+  "global_extensions": [
+    ".tmp",
+    ".temp",
+    ".cache",
+    ".bak",
+    ".old",
+    ".swp",
+    ".swo"
+  ],
+  "description": "Fichiers et dossiers exclus par défaut de la synchronisation"
+}

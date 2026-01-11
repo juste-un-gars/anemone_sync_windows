@@ -1,0 +1,101 @@
+# Configuration par défaut d'AnemoneSync
+# Ce fichier contient les paramètres par défaut de l'application
+
+app:
+  name: "AnemoneSync"
+  version: "0.1.0-dev"
+  log_level: "info"  # debug, info, warning, error, critical
+  language: "fr"     # fr, en
+
+database:
+  path: "${HOME}/.config/anemone_sync/anemone_sync.db"
+  # La base de données sera chiffrée avec SQLCipher
+  # La clé de chiffrement sera stockée dans le keystore système
+
+paths:
+  config_dir: "${HOME}/.config/anemone_sync"
+  log_dir: "${HOME}/.config/anemone_sync/logs"
+  # Windows: %APPDATA%\AnemoneSync
+  # Linux: ~/.config/anemone_sync
+  # macOS: ~/Library/Application Support/AnemoneSync
+
+logging:
+  rotation:
+    max_size_mb: 10
+    max_files: 5
+    compress: true
+  levels:
+    console: "info"
+    file: "debug"
+
+sync:
+  default_mode: "mirror"  # mirror, upload, download, mirror_priority
+  default_trigger: "realtime"  # realtime, interval, scheduled, manual
+  default_conflict_resolution: "recent"  # recent, local, remote, both, ask
+
+  realtime:
+    debounce_seconds: 30
+    batch_interval_minutes: 5
+
+  performance:
+    parallel_transfers: 4
+    buffer_size_mb: 4
+    hash_algorithm: "sha256"
+
+  network:
+    require_wifi: false
+    require_data: false
+    enable_offline_queue: true
+
+exclusions:
+  global_patterns:
+    - "*.tmp"
+    - "~$*"
+    - ".DS_Store"
+    - "Thumbs.db"
+    - "desktop.ini"
+    - "~lock.*"
+    - ".git/"
+    - ".svn/"
+    - "node_modules/"
+    - "__pycache__/"
+
+  global_extensions:
+    - ".tmp"
+    - ".temp"
+    - ".cache"
+
+ui:
+  start_minimized: false
+  show_notifications: true
+  notification_types:
+    sync_completed: true
+    sync_errors: true
+    conflicts: true
+    offline_queue: false
+    disk_space_low: true
+
+  tray_icon:
+    show_sync_progress: true
+    show_error_count: true
+
+security:
+  # Les credentials ne sont JAMAIS stockés en clair
+  # Utilisation des keystores système natifs
+  keystore_service_name: "AnemoneSync"
+  zero_memory_after_use: true
+  enable_smb3_encryption: true
+
+# Configuration avancée (à implémenter dans les phases futures)
+advanced:
+  throttling:
+    enabled: false
+    max_bandwidth_mbps: 0  # 0 = illimité
+    schedule: []  # Plages horaires avec vitesses différentes
+
+  compression:
+    enabled: false
+    algorithm: "gzip"  # gzip, zstd
+
+  delta_sync:
+    enabled: false  # Phase 2+
