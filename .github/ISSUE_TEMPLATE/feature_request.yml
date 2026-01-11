@@ -1,0 +1,122 @@
+name: ✨ Feature Request
+description: Proposer une nouvelle fonctionnalité
+title: "[FEATURE] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Merci de proposer une amélioration pour AnemoneSync!
+        Décrivez la fonctionnalité que vous aimeriez voir ajoutée.
+
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: Vérifications préliminaires
+      options:
+        - label: J'ai cherché dans les issues existantes
+          required: true
+        - label: Cette fonctionnalité n'existe pas déjà
+          required: true
+        - label: J'ai lu le PROJECT.md pour voir si c'est déjà planifié
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Le problème
+      description: Quel problème cette fonctionnalité résoudrait-elle ?
+      placeholder: |
+        Exemple: "Quand je synchronise des milliers de fichiers, je ne peux pas voir la progression..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: La solution proposée
+      description: Comment imaginez-vous cette fonctionnalité ?
+      placeholder: |
+        Exemple: "Ajouter une barre de progression dans la fenêtre principale qui montre..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considérées
+      description: Avez-vous envisagé d'autres solutions ?
+      placeholder: |
+        Exemple: "J'ai pensé à utiliser les notifications mais..."
+    validations:
+      required: false
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priorité perçue
+      description: Quelle importance a cette fonctionnalité pour vous ?
+      options:
+        - "Critique - Bloquant pour utiliser AnemoneSync"
+        - "Haute - Très important"
+        - "Moyenne - Ce serait bien de l'avoir"
+        - "Basse - Nice to have"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: phase
+    attributes:
+      label: Phase suggérée
+      description: Selon PROJECT.md, dans quelle phase cela s'intègre ?
+      options:
+        - "Phase 1 - Core / Moteur de synchronisation"
+        - "Phase 2 - Sécurité et credentials"
+        - "Phase 3 - Modes de synchronisation"
+        - "Phase 4 - Déclenchement et planification"
+        - "Phase 5 - Interface utilisateur"
+        - "Phase 6 - Performance et optimisation"
+        - "Phase 7 - Réseau et mobilité"
+        - "Phase 8 - Notifications et UX"
+        - "Phase 9 - Internationalisation"
+        - "Phase 10 - Packaging et distribution"
+        - "Phase 11+ - Fonctionnalités avancées"
+        - "Je ne sais pas"
+    validations:
+      required: false
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Cas d'usage
+      description: Comment utiliseriez-vous cette fonctionnalité ?
+      placeholder: |
+        Exemple: "Je synchronise mes photos professionnelles (200GB) et j'ai besoin de..."
+    validations:
+      required: false
+
+  - type: textarea
+    id: mockup
+    attributes:
+      label: Maquettes / Exemples
+      description: Screenshots, schémas ou exemples d'autres applications
+      placeholder: Glissez-déposez les images ici ou collez des liens
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      options:
+        - label: Je suis prêt(e) à contribuer à l'implémentation de cette fonctionnalité
+          required: false
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Contexte additionnel
+      description: Toute autre information pertinente
+      placeholder: Autre chose à ajouter ?
+    validations:
+      required: false

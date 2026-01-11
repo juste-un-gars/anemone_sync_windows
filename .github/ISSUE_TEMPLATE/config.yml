@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 📖 Documentation
+    url: https://github.com/juste-un-gars/anemone_sync_windows/blob/main/README.md
+    about: Consultez la documentation complète du projet
+  - name: 🔒 Vulnérabilité de sécurité
+    url: https://github.com/juste-un-gars/anemone_sync_windows/security/advisories/new
+    about: Signalez une vulnérabilité de sécurité de manière privée
+  - name: 💬 Discussions
+    url: https://github.com/juste-un-gars/anemone_sync_windows/discussions
+    about: Posez des questions et discutez avec la communauté

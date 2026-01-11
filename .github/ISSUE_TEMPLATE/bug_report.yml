@@ -1,0 +1,145 @@
+name: 🐛 Bug Report
+description: Signaler un bug ou un comportement inattendu
+title: "[BUG] "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Merci de prendre le temps de signaler ce bug!
+        Remplissez ce formulaire aussi complètement que possible pour nous aider à reproduire et corriger le problème.
+
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: Vérifications préliminaires
+      description: Avant de soumettre ce bug report
+      options:
+        - label: J'ai cherché dans les issues existantes
+          required: true
+        - label: J'utilise la dernière version d'AnemoneSync
+          required: true
+        - label: J'ai lu la documentation
+          required: false
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description du bug
+      description: Description claire et concise du bug
+      placeholder: Que s'est-il passé ?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Étapes pour reproduire
+      description: Comment reproduire ce bug ?
+      placeholder: |
+        1. Aller à '...'
+        2. Cliquer sur '...'
+        3. Faire défiler jusqu'à '...'
+        4. Voir l'erreur
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Comportement attendu
+      description: Que devrait-il se passer normalement ?
+      placeholder: Ce qui devrait arriver...
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Comportement actuel
+      description: Que se passe-t-il réellement ?
+      placeholder: Ce qui arrive effectivement...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Système d'exploitation
+      options:
+        - Windows 11
+        - Windows 10
+        - Windows Server 2022
+        - Windows Server 2019
+        - Linux (précisez dans les détails)
+        - macOS (précisez dans les détails)
+        - Autre (précisez dans les détails)
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version d'AnemoneSync
+      description: Quelle version utilisez-vous ?
+      placeholder: "ex: 0.2.0"
+    validations:
+      required: true
+
+  - type: input
+    id: go-version
+    attributes:
+      label: Version de Go
+      description: Résultat de `go version`
+      placeholder: "ex: go1.21.5 windows/amd64"
+    validations:
+      required: false
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration
+      description: Votre configuration (SANS LES CREDENTIALS!)
+      placeholder: |
+        Collez votre config.yaml (supprimez les infos sensibles)
+      render: yaml
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Logs pertinents (SANS LES CREDENTIALS!)
+      placeholder: |
+        Collez les logs ici
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: Si applicable, ajoutez des captures d'écran
+      placeholder: Glissez-déposez les images ici
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Contexte additionnel
+      description: Tout autre information utile
+      placeholder: Tout ce qui pourrait aider...
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: security
+    attributes:
+      label: Sécurité
+      description: S'agit-il d'un problème de sécurité ?
+      options:
+        - label: Ce bug expose une vulnérabilité de sécurité (Si oui, supprimez cette issue et suivez les instructions de SECURITY.md)
+          required: false

@@ -1,0 +1,138 @@
+# Configuration golangci-lint pour AnemoneSync
+# https://golangci-lint.run/usage/configuration/
+
+run:
+  timeout: 5m
+  tests: true
+  modules-download-mode: readonly
+
+output:
+  format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
+  sort-results: true
+
+linters:
+  enable:
+    # Enabled by default
+    - errcheck      # Checks for unchecked errors
+    - gosimple      # Simplify code
+    - govet         # Vet examines Go source code
+    - ineffassign   # Detects ineffectual assignments
+    - staticcheck   # Advanced Go linter
+    - typecheck     # Type-checks Go code
+    - unused        # Checks for unused code
+
+    # Additional recommended linters
+    - gofmt         # Checks if code is formatted
+    - goimports     # Checks import statements are formatted
+    - misspell      # Finds commonly misspelled words
+    - gosec         # Security checks
+    - goconst       # Finds repeated strings that could be constants
+    - gocyclo       # Cyclomatic complexity
+    - dupl          # Code clone detection
+    - bodyclose     # Checks HTTP response body is closed
+    - unconvert     # Remove unnecessary type conversions
+    - prealloc      # Finds slice declarations that could be preallocated
+    - exportloopref # Checks for pointers to enclosing loop variables
+    - nilerr        # Finds code that returns nil even if it checks err
+    - sqlclosecheck # Checks that sql.Rows and sql.Stmt are closed
+    - rowserrcheck  # Checks if Err of rows is checked
+    - wastedassign  # Finds wasted assignment statements
+
+  disable:
+    - deadcode      # Deprecated
+    - varcheck      # Deprecated
+    - structcheck   # Deprecated
+    - scopelint     # Deprecated
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+    exclude-functions:
+      - fmt.Fprintf
+      - fmt.Fprintln
+      - fmt.Printf
+      - fmt.Println
+
+  govet:
+    enable-all: true
+    disable:
+      - fieldalignment  # Too strict for readability
+
+  gocyclo:
+    min-complexity: 15
+
+  goconst:
+    min-len: 3
+    min-occurrences: 3
+
+  gosec:
+    severity: medium
+    confidence: medium
+    excludes:
+      - G104  # Audit errors not checked (handled by errcheck)
+    config:
+      G301: "0644"  # Acceptable file permissions
+      G302: "0600"  # Acceptable file permissions for sensitive files
+
+  misspell:
+    locale: US
+    ignore-words:
+      - anemone
+
+  goimports:
+    local-prefixes: github.com/juste-un-gars/anemone_sync_windows
+
+  dupl:
+    threshold: 100
+
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - style
+      - performance
+    disabled-checks:
+      - commentedOutCode
+      - ifElseChain
+
+issues:
+  exclude-rules:
+    # Exclude some linters from running on tests files
+    - path: _test\.go
+      linters:
+        - gocyclo
+        - errcheck
+        - dupl
+        - gosec
+        - goconst
+
+    # Exclude known linters from specific paths
+    - path: internal/database/migrations
+      linters:
+        - gocyclo
+        - goconst
+
+    # Exclude SQL-related false positives
+    - text: "sql\\.DB\\.Close"
+      linters:
+        - sqlclosecheck
+
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+  # Show all issues
+  new: false
+
+# Liste des packages à exclure de l'analyse
+# (par exemple des packages générés automatiquement)
+skip-dirs:
+  - vendor
+  - .git
+  - .github
+  - build/dist
+
+skip-files:
+  - ".*\\.pb\\.go$"
+  - ".*_gen\\.go$"
