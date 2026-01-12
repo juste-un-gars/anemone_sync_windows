@@ -449,3 +449,73 @@ func (c *SMBClient) Delete(remotePath string) error {
 
 	return nil
 }
+
+// NewSMBClientFromKeyring creates a new SMB client using credentials from the system keyring
+// server and share are used to identify the credentials in the keyring
+func NewSMBClientFromKeyring(server, share string, logger *zap.Logger) (*SMBClient, error) {
+	if server == "" {
+		return nil, fmt.Errorf("server cannot be empty")
+	}
+	if share == "" {
+		return nil, fmt.Errorf("share cannot be empty")
+	}
+
+	// Create credential manager
+	credMgr := NewCredentialManager(logger)
+
+	// Load credentials from keyring
+	creds, err := credMgr.Load(server, share)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load credentials from keyring: %w", err)
+	}
+
+	// Create client config from credentials
+	cfg := &ClientConfig{
+		Server:   creds.Server,
+		Share:    creds.Share,
+		Port:     creds.Port,
+		Username: creds.Username,
+		Password: creds.Password,
+		Domain:   creds.Domain,
+	}
+
+	// Create and return client
+	return NewSMBClient(cfg, logger)
+}
+
+// SaveCredentialsToKeyring saves the client's credentials to the system keyring
+// This allows the credentials to be reused later without storing them in config files
+func (c *SMBClient) SaveCredentialsToKeyring() error {
+	// Create credential manager
+	credMgr := NewCredentialManager(c.logger)
+
+	// Create credentials structure
+	creds := &Credentials{
+		Server:   c.server,
+		Share:    c.share,
+		Port:     c.port,
+		Username: c.username,
+		Password: c.password,
+		Domain:   c.domain,
+	}
+
+	// Save to keyring
+	if err := credMgr.Save(creds); err != nil {
+		return fmt.Errorf("failed to save credentials to keyring: %w", err)
+	}
+
+	return nil
+}
+
+// DeleteCredentialsFromKeyring removes the client's credentials from the system keyring
+func (c *SMBClient) DeleteCredentialsFromKeyring() error {
+	// Create credential manager
+	credMgr := NewCredentialManager(c.logger)
+
+	// Delete from keyring
+	if err := credMgr.Delete(c.server, c.share); err != nil {
+		return fmt.Errorf("failed to delete credentials from keyring: %w", err)
+	}
+
+	return nil
+}

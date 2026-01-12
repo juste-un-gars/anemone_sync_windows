@@ -291,3 +291,97 @@ func TestSMBClient_DeleteNotConnected(t *testing.T) {
 		t.Errorf("expected 'not connected' error, got: %v", err)
 	}
 }
+
+func TestNewSMBClientFromKeyring_Validation(t *testing.T) {
+	tests := []struct {
+		name      string
+		server    string
+		share     string
+		expectErr bool
+	}{
+		{
+			name:      "empty server",
+			server:    "",
+			share:     "test-share",
+			expectErr: true,
+		},
+		{
+			name:      "empty share",
+			server:    "test-server",
+			share:     "",
+			expectErr: true,
+		},
+		{
+			name:      "non-existent credentials",
+			server:    "non-existent-server",
+			share:     "non-existent-share",
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewSMBClientFromKeyring(tt.server, tt.share, zap.NewNop())
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error but got none")
+				}
+			}
+		})
+	}
+}
+
+func TestSMBClient_KeyringIntegration(t *testing.T) {
+	// Skip this test in CI or if keyring is not available
+	if testing.Short() {
+		t.Skip("skipping keyring integration test in short mode")
+	}
+
+	// Create a test client
+	config := &ClientConfig{
+		Server:   "test-keyring-client-server",
+		Share:    "test-keyring-client-share",
+		Port:     445,
+		Username: "testuser",
+		Password: "testpass",
+		Domain:   "TESTDOMAIN",
+	}
+
+	client, err := NewSMBClient(config, zap.NewNop())
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	// Clean up any existing credentials
+	_ = client.DeleteCredentialsFromKeyring()
+
+	// Test SaveCredentialsToKeyring
+	if err := client.SaveCredentialsToKeyring(); err != nil {
+		t.Fatalf("failed to save credentials to keyring: %v", err)
+	}
+
+	// Test loading client from keyring
+	loadedClient, err := NewSMBClientFromKeyring(config.Server, config.Share, zap.NewNop())
+	if err != nil {
+		t.Fatalf("failed to create client from keyring: %v", err)
+	}
+
+	// Verify loaded client has same configuration
+	if loadedClient.GetServer() != config.Server {
+		t.Errorf("server: expected %s, got %s", config.Server, loadedClient.GetServer())
+	}
+	if loadedClient.GetShare() != config.Share {
+		t.Errorf("share: expected %s, got %s", config.Share, loadedClient.GetShare())
+	}
+
+	// Test DeleteCredentialsFromKeyring
+	if err := client.DeleteCredentialsFromKeyring(); err != nil {
+		t.Fatalf("failed to delete credentials from keyring: %v", err)
+	}
+
+	// Verify credentials are deleted
+	_, err = NewSMBClientFromKeyring(config.Server, config.Share, zap.NewNop())
+	if err == nil {
+		t.Error("expected error when loading deleted credentials")
+	}
+}
