@@ -69,17 +69,17 @@ Ce fichier contient un résumé très court de chaque session de développement.
 
 ## Session 006 - 2026-01-12
 **Status**: ✅ Terminée (commité)
-**Durée**: ~30 min
-**Phase**: Phase 2 Client SMB (Palier 3)
+**Durée**: ~1h
+**Phase**: Phase 2 Client SMB (Paliers 3-4 - Complet ✅)
 **Réalisations**:
-- **Palier 3**: ListRemote, GetMetadata, Delete methods
-- RemoteFileInfo structure pour métadonnées (Name, Path, Size, ModTime, IsDir)
-- 3 tests unitaires ajoutés (not connected scenarios)
-**Tests**: 15/15 passent ✅
-**Fichiers modifiés**: client.go (+126 lignes), client_test.go (+69 lignes)
-**Commit**: 2aaf5ae "feat(smb): Add SMB client Palier 3"
-**Restant**: Palier 4 (authentification sécurisée avec keyring)
-**Prochaines étapes**: Palier 4 puis Phase 3 Cache Intelligent
+- **Palier 3**: ListRemote, GetMetadata, Delete + RemoteFileInfo structure
+- **Palier 4**: Keyring auth (CredentialManager, NewSMBClientFromKeyring, Save/Delete)
+- Dependencies: zalando/go-keyring v0.2.6 (Windows Credential Manager, macOS Keychain, Linux Secret Service)
+**Tests**: 23/23 passent ✅ (11 nouveaux tests)
+**Fichiers**: credentials.go (152), credentials_test.go (210), client.go (+196), client_test.go (+163)
+**Commits**: 3 (Palier 3: 2aaf5ae, Palier 4: d487d0e, Docs: 7776f6b)
+**Phase 2 Complète**: Client SMB 100% fonctionnel avec auth sécurisée
+**Prochaines étapes**: Phase 3 Cache Intelligent
 
 ---
 
