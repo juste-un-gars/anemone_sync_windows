@@ -222,3 +222,72 @@ func TestSMBClient_UploadNotConnected(t *testing.T) {
 		t.Errorf("expected 'not connected' error, got: %v", err)
 	}
 }
+
+func TestSMBClient_ListRemoteNotConnected(t *testing.T) {
+	config := &ClientConfig{
+		Server:   "test-server",
+		Share:    "test-share",
+		Username: "user",
+		Password: "pass",
+	}
+
+	client, err := NewSMBClient(config, zap.NewNop())
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	// Try to list without connecting
+	_, err = client.ListRemote(".")
+	if err == nil {
+		t.Error("expected error when listing without connection")
+	}
+	if err != nil && err.Error() != "not connected to SMB server" {
+		t.Errorf("expected 'not connected' error, got: %v", err)
+	}
+}
+
+func TestSMBClient_GetMetadataNotConnected(t *testing.T) {
+	config := &ClientConfig{
+		Server:   "test-server",
+		Share:    "test-share",
+		Username: "user",
+		Password: "pass",
+	}
+
+	client, err := NewSMBClient(config, zap.NewNop())
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	// Try to get metadata without connecting
+	_, err = client.GetMetadata("file.txt")
+	if err == nil {
+		t.Error("expected error when getting metadata without connection")
+	}
+	if err != nil && err.Error() != "not connected to SMB server" {
+		t.Errorf("expected 'not connected' error, got: %v", err)
+	}
+}
+
+func TestSMBClient_DeleteNotConnected(t *testing.T) {
+	config := &ClientConfig{
+		Server:   "test-server",
+		Share:    "test-share",
+		Username: "user",
+		Password: "pass",
+	}
+
+	client, err := NewSMBClient(config, zap.NewNop())
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	// Try to delete without connecting
+	err = client.Delete("file.txt")
+	if err == nil {
+		t.Error("expected error when deleting without connection")
+	}
+	if err != nil && err.Error() != "not connected to SMB server" {
+		t.Errorf("expected 'not connected' error, got: %v", err)
+	}
+}

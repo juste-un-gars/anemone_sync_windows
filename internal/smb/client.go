@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/hirochachacha/go-smb2"
 	"go.uber.org/zap"
@@ -320,6 +321,131 @@ func (c *SMBClient) Upload(localPath, remotePath string) error {
 		zap.String("remote", remotePath),
 		zap.Int64("bytes", written),
 		zap.Int64("size", localInfo.Size()))
+
+	return nil
+}
+
+// RemoteFileInfo contains metadata about a remote file or directory
+type RemoteFileInfo struct {
+	Name    string    // File or directory name
+	Path    string    // Full path relative to share root
+	Size    int64     // Size in bytes (0 for directories)
+	ModTime time.Time // Last modification time
+	IsDir   bool      // True if this is a directory
+}
+
+// ListRemote lists files and directories in the specified remote path
+// remotePath is relative to the share root (e.g., "folder" or "" for root)
+// Returns a slice of RemoteFileInfo for all entries in the directory
+func (c *SMBClient) ListRemote(remotePath string) ([]RemoteFileInfo, error) {
+	c.mu.RLock()
+	if !c.connected {
+		c.mu.RUnlock()
+		return nil, fmt.Errorf("not connected to SMB server")
+	}
+	fs := c.fs
+	c.mu.RUnlock()
+
+	c.logger.Debug("listing remote directory",
+		zap.String("remote", remotePath))
+
+	// Use "." for root if path is empty
+	if remotePath == "" {
+		remotePath = "."
+	}
+
+	// Read directory entries
+	entries, err := fs.ReadDir(remotePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list directory %s: %w", remotePath, err)
+	}
+
+	// Convert to RemoteFileInfo slice
+	result := make([]RemoteFileInfo, 0, len(entries))
+	for _, info := range entries {
+		// Build full path
+		fullPath := remotePath
+		if remotePath == "." {
+			fullPath = info.Name()
+		} else {
+			fullPath = filepath.Join(remotePath, info.Name())
+		}
+
+		result = append(result, RemoteFileInfo{
+			Name:    info.Name(),
+			Path:    fullPath,
+			Size:    info.Size(),
+			ModTime: info.ModTime(),
+			IsDir:   info.IsDir(),
+		})
+	}
+
+	c.logger.Info("remote directory listed successfully",
+		zap.String("remote", remotePath),
+		zap.Int("count", len(result)))
+
+	return result, nil
+}
+
+// GetMetadata retrieves metadata for a specific remote file or directory
+// remotePath is relative to the share root (e.g., "folder/file.txt")
+// Returns RemoteFileInfo with metadata about the file/directory
+func (c *SMBClient) GetMetadata(remotePath string) (*RemoteFileInfo, error) {
+	c.mu.RLock()
+	if !c.connected {
+		c.mu.RUnlock()
+		return nil, fmt.Errorf("not connected to SMB server")
+	}
+	fs := c.fs
+	c.mu.RUnlock()
+
+	c.logger.Debug("getting remote file metadata",
+		zap.String("remote", remotePath))
+
+	// Stat the file/directory
+	info, err := fs.Stat(remotePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get metadata for %s: %w", remotePath, err)
+	}
+
+	result := &RemoteFileInfo{
+		Name:    info.Name(),
+		Path:    remotePath,
+		Size:    info.Size(),
+		ModTime: info.ModTime(),
+		IsDir:   info.IsDir(),
+	}
+
+	c.logger.Debug("metadata retrieved successfully",
+		zap.String("remote", remotePath),
+		zap.Int64("size", result.Size),
+		zap.Bool("isDir", result.IsDir))
+
+	return result, nil
+}
+
+// Delete removes a file from the remote SMB share
+// remotePath is relative to the share root (e.g., "folder/file.txt")
+// Note: This only removes files, not directories (use RemoveAll for directories)
+func (c *SMBClient) Delete(remotePath string) error {
+	c.mu.RLock()
+	if !c.connected {
+		c.mu.RUnlock()
+		return fmt.Errorf("not connected to SMB server")
+	}
+	fs := c.fs
+	c.mu.RUnlock()
+
+	c.logger.Debug("deleting remote file",
+		zap.String("remote", remotePath))
+
+	// Remove the file
+	if err := fs.Remove(remotePath); err != nil {
+		return fmt.Errorf("failed to delete %s: %w", remotePath, err)
+	}
+
+	c.logger.Info("remote file deleted successfully",
+		zap.String("remote", remotePath))
 
 	return nil
 }
