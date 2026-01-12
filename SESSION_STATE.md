@@ -67,6 +67,20 @@ Ce fichier contient un résumé très court de chaque session de développement.
 **Restant**: Palier 3 (ListRemote, GetMetadata, Delete)
 **Prochaines étapes**: Paliers 3-4 puis authentification sécurisée (keyring)
 
+## Session 006 - 2026-01-12
+**Status**: ✅ Terminée (commité)
+**Durée**: ~30 min
+**Phase**: Phase 2 Client SMB (Palier 3)
+**Réalisations**:
+- **Palier 3**: ListRemote, GetMetadata, Delete methods
+- RemoteFileInfo structure pour métadonnées (Name, Path, Size, ModTime, IsDir)
+- 3 tests unitaires ajoutés (not connected scenarios)
+**Tests**: 15/15 passent ✅
+**Fichiers modifiés**: client.go (+126 lignes), client_test.go (+69 lignes)
+**Commit**: 2aaf5ae "feat(smb): Add SMB client Palier 3"
+**Restant**: Palier 4 (authentification sécurisée avec keyring)
+**Prochaines étapes**: Palier 4 puis Phase 3 Cache Intelligent
+
 ---
 
 ## Instructions de maintenance
