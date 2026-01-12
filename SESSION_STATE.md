@@ -69,17 +69,19 @@ Ce fichier contient un résumé très court de chaque session de développement.
 
 ## Session 006 - 2026-01-12
 **Status**: ✅ Terminée (commité)
-**Durée**: ~1h
-**Phase**: Phase 2 Client SMB (Paliers 3-4 - Complet ✅)
+**Durée**: ~2h
+**Phase**: Phase 2 Client SMB (Paliers 3-4 - Complet ✅) + Phase 3 Cache Intelligent (Complet ✅)
 **Réalisations**:
-- **Palier 3**: ListRemote, GetMetadata, Delete + RemoteFileInfo structure
-- **Palier 4**: Keyring auth (CredentialManager, NewSMBClientFromKeyring, Save/Delete)
-- Dependencies: zalando/go-keyring v0.2.6 (Windows Credential Manager, macOS Keychain, Linux Secret Service)
-**Tests**: 23/23 passent ✅ (11 nouveaux tests)
-**Fichiers**: credentials.go (152), credentials_test.go (210), client.go (+196), client_test.go (+163)
-**Commits**: 3 (Palier 3: 2aaf5ae, Palier 4: d487d0e, Docs: 7776f6b)
-**Phase 2 Complète**: Client SMB 100% fonctionnel avec auth sécurisée
-**Prochaines étapes**: Phase 3 Cache Intelligent
+- **Phase 2 Palier 3**: ListRemote, GetMetadata, Delete + RemoteFileInfo structure
+- **Phase 2 Palier 4**: Keyring auth (CredentialManager, NewSMBClientFromKeyring, Save/Delete)
+- **Phase 3 Cache**: CacheManager + ChangeDetector (3-way merge, conflict resolution)
+**Tests**: 34/34 passent ✅ (SMB: 23, Cache: 11)
+**Fichiers créés**:
+  - Phase 2: credentials.go (152), credentials_test.go (210), client.go (+196), client_test.go (+163)
+  - Phase 3: cache.go (264), detector.go (290), cache_test.go (241), detector_test.go (301)
+**Commits**: 5 (Palier 3: 2aaf5ae, Palier 4: d487d0e, Docs: 7776f6b/d72fef6, Cache: e4550cd)
+**Phase 2 & 3 Complètes**: Client SMB + Cache intelligent 3-way merge
+**Prochaines étapes**: Phase 4 Moteur de Synchronisation
 
 ---
 
