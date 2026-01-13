@@ -15,6 +15,7 @@ type Executor struct {
 	logger       *zap.Logger
 	bufferSizeMB int
 	retryPolicy  *RetryPolicy
+	numWorkers   int // Number of workers for parallel execution (0 = sequential)
 }
 
 // NewExecutor creates a new executor
@@ -31,6 +32,7 @@ func NewExecutor(bufferSizeMB int, logger *zap.Logger) *Executor {
 		logger:       logger,
 		bufferSizeMB: bufferSizeMB,
 		retryPolicy:  DefaultRetryPolicy(logger.Named("retry")),
+		numWorkers:   0, // Default to sequential execution
 	}
 }
 
@@ -39,8 +41,18 @@ func (ex *Executor) SetRetryPolicy(policy *RetryPolicy) {
 	ex.retryPolicy = policy
 }
 
+// SetParallelMode enables parallel execution with the specified number of workers
+// Set numWorkers to 0 to disable parallel mode (sequential execution)
+func (ex *Executor) SetParallelMode(numWorkers int) {
+	if numWorkers < 0 {
+		numWorkers = 0
+	}
+	ex.numWorkers = numWorkers
+	ex.logger.Info("parallel mode configured", zap.Int("workers", numWorkers))
+}
+
 // Execute executes a batch of sync decisions
-// This is a sequential implementation for Palier 1 (no worker pool yet)
+// Uses parallel execution if numWorkers > 0, otherwise sequential
 func (ex *Executor) Execute(
 	ctx context.Context,
 	decisions []*cache.SyncDecision,
@@ -52,12 +64,22 @@ func (ex *Executor) Execute(
 		return []*SyncAction{}, nil
 	}
 
-	ex.logger.Info("executing sync actions",
-		zap.Int("count", len(decisions)),
-	)
-
 	// Prioritize actions to minimize data loss risk
 	decisions = ex.prioritizeActions(decisions)
+
+	// Use parallel execution if configured
+	if ex.numWorkers > 0 {
+		ex.logger.Info("executing sync actions in parallel",
+			zap.Int("count", len(decisions)),
+			zap.Int("workers", ex.numWorkers),
+		)
+		return ExecuteParallel(ctx, decisions, smbClient, ex, ex.numWorkers, progressFn, ex.logger)
+	}
+
+	// Sequential execution
+	ex.logger.Info("executing sync actions sequentially",
+		zap.Int("count", len(decisions)),
+	)
 
 	actions := make([]*SyncAction, 0, len(decisions))
 	var bytesTransferred int64
