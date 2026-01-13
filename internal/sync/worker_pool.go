@@ -142,6 +142,13 @@ func (wp *WorkerPool) Stop() {
 // Submit submits a job to the worker pool
 // Returns false if the pool is stopped or the context is cancelled
 func (wp *WorkerPool) Submit(ctx context.Context, job *SyncJob) bool {
+	// Check if context is already cancelled before attempting submission
+	select {
+	case <-ctx.Done():
+		return false
+	default:
+	}
+
 	wp.mu.RLock()
 	if wp.stopped {
 		wp.mu.RUnlock()
