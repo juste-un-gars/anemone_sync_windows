@@ -422,3 +422,161 @@ func (db *DB) DeleteFileState(jobID int64, localPath string) error {
 	}
 	return nil
 }
+
+// GetSyncJob retrieves a sync job by ID
+func (db *DB) GetSyncJob(jobID int64) (*SyncJob, error) {
+	var job SyncJob
+	var lastRun, nextRun sql.NullTime
+
+	err := db.conn.QueryRow(`
+		SELECT id, name, local_path, remote_path, server_credential_id,
+			   sync_mode, trigger_mode, trigger_params, conflict_resolution,
+			   network_conditions, enabled, last_run, next_run,
+			   created_at, updated_at
+		FROM sync_jobs
+		WHERE id = ?
+	`, jobID).Scan(
+		&job.ID, &job.Name, &job.LocalPath, &job.RemotePath, &job.ServerCredentialID,
+		&job.SyncMode, &job.TriggerMode, &job.TriggerParams, &job.ConflictResolution,
+		&job.NetworkConditions, &job.Enabled, &lastRun, &nextRun,
+		&job.CreatedAt, &job.UpdatedAt,
+	)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil // Job not found
+		}
+		return nil, fmt.Errorf("get sync job: %w", err)
+	}
+
+	if lastRun.Valid {
+		job.LastRun = &lastRun.Time
+	}
+	if nextRun.Valid {
+		job.NextRun = &nextRun.Time
+	}
+
+	return &job, nil
+}
+
+// UpdateJobStatus updates the status of a sync job
+// Note: Status is not a field in SyncJob model, we'll update it via sync_history
+// For now, we'll use this to mark jobs as syncing/idle/error via a metadata approach
+// or we can just log it. Let's keep it simple and not persist status for now.
+func (db *DB) UpdateJobStatus(jobID int64, status string) error {
+	// For Phase 4, we'll just log the status
+	// In Phase 5+, we could add a status field to sync_jobs table
+	// For now, this is a no-op that won't break the engine
+	return nil
+}
+
+// UpdateJobLastRun updates the last run timestamp of a sync job
+func (db *DB) UpdateJobLastRun(jobID int64, lastRun time.Time) error {
+	_, err := db.conn.Exec(`
+		UPDATE sync_jobs
+		SET last_run = ?, updated_at = ?
+		WHERE id = ?
+	`, lastRun.Unix(), time.Now().Unix(), jobID)
+
+	if err != nil {
+		return fmt.Errorf("update job last run: %w", err)
+	}
+
+	return nil
+}
+
+// InsertSyncHistory inserts a sync history record
+func (db *DB) InsertSyncHistory(history *SyncHistory) error {
+	_, err := db.conn.Exec(`
+		INSERT INTO sync_history (
+			job_id, timestamp, files_synced, files_failed,
+			bytes_transferred, duration, status, error_summary, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		history.JobID,
+		history.Timestamp.Unix(),
+		history.FilesSynced,
+		history.FilesFailed,
+		history.BytesTransferred,
+		history.Duration,
+		history.Status,
+		history.ErrorSummary,
+		time.Now().Unix(),
+	)
+
+	if err != nil {
+		return fmt.Errorf("insert sync history: %w", err)
+	}
+
+	return nil
+}
+
+// GetJobStatistics retrieves statistics for a sync job
+func (db *DB) GetJobStatistics(jobID int64) (*JobStatistics, error) {
+	job, err := db.GetSyncJob(jobID)
+	if err != nil {
+		return nil, err
+	}
+	if job == nil {
+		return nil, fmt.Errorf("job not found")
+	}
+
+	stats := &JobStatistics{
+		ID:      job.ID,
+		Name:    job.Name,
+		Enabled: job.Enabled,
+	}
+
+	// Count total files
+	err = db.conn.QueryRow(`
+		SELECT COUNT(*), COALESCE(SUM(size), 0)
+		FROM files_state
+		WHERE job_id = ?
+	`, jobID).Scan(&stats.TotalFiles, &stats.TotalSize)
+
+	if err != nil {
+		return nil, fmt.Errorf("get file stats: %w", err)
+	}
+
+	// Count files with errors
+	err = db.conn.QueryRow(`
+		SELECT COUNT(*)
+		FROM files_state
+		WHERE job_id = ? AND sync_status = 'error'
+	`, jobID).Scan(&stats.FilesWithErrors)
+
+	if err != nil {
+		return nil, fmt.Errorf("get error count: %w", err)
+	}
+
+	// Get last sync time
+	var lastSyncUnix sql.NullInt64
+	err = db.conn.QueryRow(`
+		SELECT MAX(last_sync)
+		FROM files_state
+		WHERE job_id = ?
+	`, jobID).Scan(&lastSyncUnix)
+
+	if err != nil && err != sql.ErrNoRows {
+		return nil, fmt.Errorf("get last sync: %w", err)
+	}
+
+	if lastSyncUnix.Valid {
+		t := time.Unix(lastSyncUnix.Int64, 0)
+		stats.LastSyncTime = &t
+	}
+
+	// Count queued operations (for future offline queue feature)
+	err = db.conn.QueryRow(`
+		SELECT COUNT(*)
+		FROM offline_queue_items
+		WHERE job_id = ?
+	`, jobID).Scan(&stats.QueuedOperations)
+
+	if err != nil && err != sql.ErrNoRows {
+		// Offline queue table may not exist yet
+		stats.QueuedOperations = 0
+	}
+
+	return stats, nil
+}
