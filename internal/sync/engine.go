@@ -418,15 +418,49 @@ func (e *Engine) detectChanges(ctx context.Context, req *SyncRequest,
 	}
 
 	// Separate conflicts from executable decisions
-	conflicts = make([]*cache.SyncDecision, 0)
+	initialConflicts := make([]*cache.SyncDecision, 0)
 	decisions = make([]*cache.SyncDecision, 0)
 
 	for _, decision := range allDecisions {
 		if decision.NeedsResolution {
-			conflicts = append(conflicts, decision)
+			initialConflicts = append(initialConflicts, decision)
 		} else {
 			decisions = append(decisions, decision)
 		}
+	}
+
+	e.logger.Info("initial change detection completed",
+		zap.Int("total_decisions", len(allDecisions)),
+		zap.Int("executable", len(decisions)),
+		zap.Int("conflicts", len(initialConflicts)),
+	)
+
+	// Resolve conflicts if there are any and a resolution policy is set
+	if len(initialConflicts) > 0 && req.ConflictResolution != "" {
+		resolver, err := NewConflictResolver(req.ConflictResolution, e.logger.Named("conflict_resolver"))
+		if err != nil {
+			e.logger.Warn("failed to create conflict resolver",
+				zap.Error(err),
+				zap.String("policy", req.ConflictResolution),
+			)
+			conflicts = initialConflicts
+		} else {
+			// Attempt to resolve conflicts
+			resolved, unresolved := resolver.ResolveConflicts(initialConflicts)
+
+			// Add resolved conflicts to decisions
+			decisions = append(decisions, resolved...)
+			conflicts = unresolved
+
+			e.logger.Info("conflict resolution applied",
+				zap.Int("initial_conflicts", len(initialConflicts)),
+				zap.Int("resolved", len(resolved)),
+				zap.Int("unresolved", len(unresolved)),
+				zap.String("policy", req.ConflictResolution),
+			)
+		}
+	} else {
+		conflicts = initialConflicts
 	}
 
 	// Filter decisions based on sync mode
@@ -435,7 +469,7 @@ func (e *Engine) detectChanges(ctx context.Context, req *SyncRequest,
 	e.logger.Info("change detection completed",
 		zap.Int("total_decisions", len(allDecisions)),
 		zap.Int("executable", len(decisions)),
-		zap.Int("conflicts", len(conflicts)),
+		zap.Int("final_conflicts", len(conflicts)),
 	)
 
 	return decisions, conflicts, nil

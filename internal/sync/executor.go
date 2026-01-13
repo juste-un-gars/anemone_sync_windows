@@ -14,6 +14,7 @@ import (
 type Executor struct {
 	logger       *zap.Logger
 	bufferSizeMB int
+	retryPolicy  *RetryPolicy
 }
 
 // NewExecutor creates a new executor
@@ -29,7 +30,13 @@ func NewExecutor(bufferSizeMB int, logger *zap.Logger) *Executor {
 	return &Executor{
 		logger:       logger,
 		bufferSizeMB: bufferSizeMB,
+		retryPolicy:  DefaultRetryPolicy(logger.Named("retry")),
 	}
+}
+
+// SetRetryPolicy sets a custom retry policy
+func (ex *Executor) SetRetryPolicy(policy *RetryPolicy) {
+	ex.retryPolicy = policy
 }
 
 // Execute executes a batch of sync decisions
@@ -133,23 +140,26 @@ func (ex *Executor) executeAction(
 
 	startTime := timeNow()
 
-	var err error
-	switch decision.Action {
-	case cache.ActionUpload:
-		err = ex.executeUpload(ctx, decision, smbClient, action)
+	// Wrap action execution with retry logic
+	operationName := fmt.Sprintf("%s:%s", decision.Action, decision.LocalPath)
+	err := ex.retryPolicy.Retry(ctx, operationName, func() error {
+		switch decision.Action {
+		case cache.ActionUpload:
+			return ex.executeUpload(ctx, decision, smbClient, action)
 
-	case cache.ActionDownload:
-		err = ex.executeDownload(ctx, decision, smbClient, action)
+		case cache.ActionDownload:
+			return ex.executeDownload(ctx, decision, smbClient, action)
 
-	case cache.ActionDeleteLocal:
-		err = ex.executeDeleteLocal(ctx, decision, action)
+		case cache.ActionDeleteLocal:
+			return ex.executeDeleteLocal(ctx, decision, action)
 
-	case cache.ActionDeleteRemote:
-		err = ex.executeDeleteRemote(ctx, decision, smbClient, action)
+		case cache.ActionDeleteRemote:
+			return ex.executeDeleteRemote(ctx, decision, smbClient, action)
 
-	default:
-		err = fmt.Errorf("unknown action: %s", decision.Action)
-	}
+		default:
+			return fmt.Errorf("unknown action: %s", decision.Action)
+		}
+	})
 
 	action.Duration = timeNow().Sub(startTime)
 
