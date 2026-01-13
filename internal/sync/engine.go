@@ -355,29 +355,53 @@ func (e *Engine) scanFiles(ctx context.Context, req *SyncRequest, smbClient *smb
 	return localFiles, remoteFiles, cachedFiles, nil
 }
 
-// scanRemote scans remote files recursively (simplified version for Palier 1)
+// scanRemote scans remote files recursively using RemoteScanner
 func (e *Engine) scanRemote(ctx context.Context, smbClient *smb.SMBClient, basePath string) (map[string]*cache.FileInfo, error) {
-	files := make(map[string]*cache.FileInfo)
-
-	// Simplified: just list top-level files for now
-	// Full recursive implementation will be in remote_scanner.go (Palier 2)
-	entries, err := smbClient.ListRemote(basePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list remote: %w", err)
+	// Create progress callback for remote scanning
+	progressCallback := func(progress RemoteScanProgress) {
+		e.logger.Debug("remote scan progress",
+			zap.Int("files", progress.FilesFound),
+			zap.Int("dirs", progress.DirsScanned),
+			zap.Int64("bytes", progress.BytesDiscovered),
+			zap.String("current_dir", progress.CurrentDir),
+		)
 	}
 
-	for _, entry := range entries {
-		if !entry.IsDir {
-			files[entry.Path] = &cache.FileInfo{
-				Path:  entry.Path,
-				Size:  entry.Size,
-				MTime: entry.ModTime,
-				Hash:  "", // Hash not available from remote
+	// Create remote scanner
+	scanner := NewRemoteScanner(smbClient, e.logger.Named("remote_scanner"), progressCallback)
+
+	// Perform scan
+	result, err := scanner.Scan(ctx, basePath)
+	if err != nil {
+		return nil, fmt.Errorf("remote scan failed: %w", err)
+	}
+
+	// Log scan results
+	e.logger.Info("remote scan completed",
+		zap.Int("files", result.TotalFiles),
+		zap.Int("dirs", result.TotalDirs),
+		zap.Int64("bytes", result.TotalBytes),
+		zap.Duration("duration", result.Duration),
+		zap.Int("errors", len(result.Errors)),
+		zap.Bool("partial_success", result.PartialSuccess),
+	)
+
+	// Warn about any errors encountered
+	if len(result.Errors) > 0 {
+		e.logger.Warn("remote scan encountered errors",
+			zap.Int("error_count", len(result.Errors)),
+		)
+		for i, scanErr := range result.Errors {
+			if i < 5 { // Log first 5 errors
+				e.logger.Warn("remote scan error", zap.Error(scanErr))
 			}
+		}
+		if len(result.Errors) > 5 {
+			e.logger.Warn("additional errors omitted", zap.Int("count", len(result.Errors)-5))
 		}
 	}
 
-	return files, nil
+	return result.Files, nil
 }
 
 // detectChanges handles Phase 3: Detection
