@@ -100,6 +100,21 @@ Ce fichier contient un résumé très court de chaque session de développement.
 **Commit**: a13353b "feat(sync): Implement Phase 4 Palier 1 - Sync Engine Foundation"
 **Prochaines étapes**: Palier 2 (remote_scanner + progress), puis Palier 3 (retry + conflict), Palier 4 (worker pool + tests)
 
+## Session 008 - 2026-01-13
+**Status**: ✅ Terminée (Palier 2 commité)
+**Durée**: ~1.5h
+**Phase**: Phase 4 Moteur de Synchronisation (Palier 2/4)
+**Réalisations**:
+- **RemoteScanner**: remote_scanner.go (230 lignes) - Scan récursif SMB avec callbacks, gestion erreurs partielles
+- **ProgressTracker**: progress.go (260 lignes) - Calcul pourcentage automatique, throttling, transfer rate/ETA
+- **SMBClientInterface**: Interface pour mock/test, découplage dépendances
+- **Tests**: remote_scanner_test.go (365 lignes), progress_test.go (485 lignes) - 24 tests, 100% passent ✅
+- **Intégration**: engine.go mis à jour pour utiliser RemoteScanner au lieu de ListRemote simple
+**Features**: Progress callbacks (10 dirs/100 fichiers), cancellation, partial success, phase weights
+**Total**: 4 fichiers créés, 1 modifié, ~1393 lignes ajoutées
+**Commit**: 22de4af "feat(sync): Implement Phase 4 Palier 2 - Remote Scanner & Progress System"
+**Prochaines étapes**: Palier 3 (retry logic + conflict resolution), puis Palier 4 (worker pool + tests complets)
+
 ---
 
 ## Instructions de maintenance
