@@ -140,11 +140,13 @@ Ce fichier contient un résumé très court de chaque session de développement.
 - **Integration Tests**: integration_test.go (380 lignes) - Engine creation, validation, error handling
 - **Worker Pool Tests**: worker_pool_test.go (410 lignes) - 13 tests lifecycle, jobs, cancellation
 - **Executor Integration**: Mode parallèle transparent avec fallback séquentiel
+- **Bug Fix**: Context cancellation race condition dans Submit (235a500)
 **Features**: Context cancellation, statistics atomiques, channels bufferisés, ordering preservation
 **Total**: 3 fichiers créés, 1 modifié, ~1140 lignes ajoutées
 **Tests**: 71+ tests Phase 4 (Paliers 1-4), tous passent ✅
-**Commit**: cf3da27 "feat(sync): Implement Phase 4 Palier 4 - Worker Pool & Integration Tests"
+**Commits**: cf3da27 "feat(sync): Implement Phase 4 Palier 4 - Worker Pool & Integration Tests", 235a500 "fix(sync): Fix context cancellation check"
 **PHASE 4 COMPLÈTE**: Engine complet (orchestration + remote scan + retry + conflict + worker pool)
+**Prochaines étapes**: Documentation (sessions détaillées 007-010 + mise à jour ARCHITECTURE.md) puis Phase 5 (UI) ou Phase 6 (Watchers)
 
 ---
 
