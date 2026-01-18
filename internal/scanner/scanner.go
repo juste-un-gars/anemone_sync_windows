@@ -233,7 +233,16 @@ func (s *Scanner) Scan(ctx context.Context, req ScanRequest) (*ScanResult, error
 		}
 
 		result.TotalFiles++
-		foundFiles[path] = true
+
+		// Calculate relative path for foundFiles tracking (must match DB storage format)
+		relPath, relErr := filepath.Rel(req.BasePath, path)
+		if relErr == nil {
+			relPath = filepath.ToSlash(relPath) // Normalize to forward slashes
+			foundFiles[relPath] = true
+		} else {
+			// Fallback to absolute path if relative fails (should not happen)
+			foundFiles[path] = true
+		}
 
 		// Process file with 3-step algorithm
 		fileInfo, err := s.processFile(ctx, req, path, metadata)
@@ -334,17 +343,24 @@ func (s *Scanner) Scan(ctx context.Context, req ScanRequest) (*ScanResult, error
 
 // processFile implements the 3-step change detection algorithm
 func (s *Scanner) processFile(ctx context.Context, req ScanRequest, path string, metadata *FileMetadata) (*FileInfo, error) {
-	// Create FileInfo
+	// Calculate relative path for storage (not absolute path)
+	relPath, err := filepath.Rel(req.BasePath, path)
+	if err != nil {
+		return nil, WrapError(err, "get relative path for %s", path)
+	}
+	relPath = filepath.ToSlash(relPath) // Normalize to forward slashes
+
+	// Create FileInfo with relative path
 	remotePath := s.mapToRemotePath(req.BasePath, req.RemoteBase, path)
 	fileInfo := &FileInfo{
-		LocalPath:  path,
+		LocalPath:  relPath, // Store relative path, not absolute
 		RemotePath: remotePath,
 		Size:       metadata.Size,
 		MTime:      metadata.MTime,
 	}
 
-	// Step 1: Get existing file state from DB
-	dbState, err := s.getFileState(req.JobID, path)
+	// Step 1: Get existing file state from DB (using relative path)
+	dbState, err := s.getFileState(req.JobID, relPath)
 	if err != nil {
 		// File not in DB = NEW file
 		fileInfo.Status = StatusNew

@@ -74,6 +74,12 @@ func Open(cfg Config) (*DB, error) {
 		return nil, fmt.Errorf("erreur vérification version schéma: %w", err)
 	}
 
+	// Clean up corrupted cache entries (absolute paths from bug)
+	if err := db.cleanupCorruptedCacheEntries(); err != nil {
+		// Log but don't fail - this is a cleanup operation
+		fmt.Printf("Warning: failed to cleanup corrupted cache entries: %v\n", err)
+	}
+
 	return db, nil
 }
 
@@ -112,6 +118,28 @@ func (db *DB) checkSchemaVersion() error {
 	// Pour l'instant, nous vérifions juste que la version existe
 	if version == "" {
 		return fmt.Errorf("version du schéma invalide")
+	}
+
+	return nil
+}
+
+// cleanupCorruptedCacheEntries removes files_state entries with absolute Windows paths.
+// This fixes a bug where paths like "D:\data\file.txt" were stored instead of "data/file.txt".
+func (db *DB) cleanupCorruptedCacheEntries() error {
+	// Delete entries where local_path contains Windows drive letter (e.g., "C:\", "D:\")
+	// These are corrupted entries from a previous bug
+	result, err := db.conn.Exec(`
+		DELETE FROM files_state
+		WHERE local_path LIKE '%:\%'
+		   OR local_path LIKE '%:/%'
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to cleanup corrupted cache entries: %w", err)
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected > 0 {
+		fmt.Printf("Cleaned up %d corrupted cache entries with absolute paths\n", rowsAffected)
 	}
 
 	return nil
@@ -426,7 +454,9 @@ func (db *DB) DeleteFileState(jobID int64, localPath string) error {
 // GetSyncJob retrieves a sync job by ID
 func (db *DB) GetSyncJob(jobID int64) (*SyncJob, error) {
 	var job SyncJob
-	var lastRun, nextRun sql.NullTime
+	var lastRun, nextRun sql.NullInt64
+	var triggerParams, conflictRes, networkCond sql.NullString
+	var createdAt, updatedAt int64
 
 	err := db.conn.QueryRow(`
 		SELECT id, name, local_path, remote_path, server_credential_id,
@@ -437,9 +467,9 @@ func (db *DB) GetSyncJob(jobID int64) (*SyncJob, error) {
 		WHERE id = ?
 	`, jobID).Scan(
 		&job.ID, &job.Name, &job.LocalPath, &job.RemotePath, &job.ServerCredentialID,
-		&job.SyncMode, &job.TriggerMode, &job.TriggerParams, &job.ConflictResolution,
-		&job.NetworkConditions, &job.Enabled, &lastRun, &nextRun,
-		&job.CreatedAt, &job.UpdatedAt,
+		&job.SyncMode, &job.TriggerMode, &triggerParams, &conflictRes,
+		&networkCond, &job.Enabled, &lastRun, &nextRun,
+		&createdAt, &updatedAt,
 	)
 
 	if err != nil {
@@ -449,12 +479,25 @@ func (db *DB) GetSyncJob(jobID int64) (*SyncJob, error) {
 		return nil, fmt.Errorf("get sync job: %w", err)
 	}
 
+	if triggerParams.Valid {
+		job.TriggerParams = triggerParams.String
+	}
+	if conflictRes.Valid {
+		job.ConflictResolution = conflictRes.String
+	}
+	if networkCond.Valid {
+		job.NetworkConditions = networkCond.String
+	}
 	if lastRun.Valid {
-		job.LastRun = &lastRun.Time
+		t := time.Unix(lastRun.Int64, 0)
+		job.LastRun = &t
 	}
 	if nextRun.Valid {
-		job.NextRun = &nextRun.Time
+		t := time.Unix(nextRun.Int64, 0)
+		job.NextRun = &t
 	}
+	job.CreatedAt = time.Unix(createdAt, 0)
+	job.UpdatedAt = time.Unix(updatedAt, 0)
 
 	return &job, nil
 }
@@ -579,4 +622,423 @@ func (db *DB) GetJobStatistics(jobID int64) (*JobStatistics, error) {
 	}
 
 	return stats, nil
+}
+
+// --- Sync Jobs CRUD ---
+
+// GetAllSyncJobs retrieves all sync jobs
+func (db *DB) GetAllSyncJobs() ([]*SyncJob, error) {
+	rows, err := db.conn.Query(`
+		SELECT id, name, local_path, remote_path, server_credential_id,
+			   sync_mode, trigger_mode, trigger_params, conflict_resolution,
+			   network_conditions, enabled, last_run, next_run,
+			   created_at, updated_at
+		FROM sync_jobs
+		ORDER BY name ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("query sync jobs: %w", err)
+	}
+	defer rows.Close()
+
+	var jobs []*SyncJob
+	for rows.Next() {
+		var job SyncJob
+		var lastRun, nextRun sql.NullInt64
+		var triggerParams, conflictRes, networkCond sql.NullString
+		var createdAt, updatedAt int64
+
+		err := rows.Scan(
+			&job.ID, &job.Name, &job.LocalPath, &job.RemotePath, &job.ServerCredentialID,
+			&job.SyncMode, &job.TriggerMode, &triggerParams, &conflictRes,
+			&networkCond, &job.Enabled, &lastRun, &nextRun,
+			&createdAt, &updatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan sync job: %w", err)
+		}
+
+		if triggerParams.Valid {
+			job.TriggerParams = triggerParams.String
+		}
+		if conflictRes.Valid {
+			job.ConflictResolution = conflictRes.String
+		}
+		if networkCond.Valid {
+			job.NetworkConditions = networkCond.String
+		}
+		if lastRun.Valid {
+			t := time.Unix(lastRun.Int64, 0)
+			job.LastRun = &t
+		}
+		if nextRun.Valid {
+			t := time.Unix(nextRun.Int64, 0)
+			job.NextRun = &t
+		}
+		job.CreatedAt = time.Unix(createdAt, 0)
+		job.UpdatedAt = time.Unix(updatedAt, 0)
+
+		jobs = append(jobs, &job)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate sync jobs: %w", err)
+	}
+
+	return jobs, nil
+}
+
+// CreateSyncJob creates a new sync job
+func (db *DB) CreateSyncJob(job *SyncJob) error {
+	now := time.Now().Unix()
+
+	var lastRunUnix, nextRunUnix sql.NullInt64
+	if job.LastRun != nil {
+		lastRunUnix = sql.NullInt64{Int64: job.LastRun.Unix(), Valid: true}
+	}
+	if job.NextRun != nil {
+		nextRunUnix = sql.NullInt64{Int64: job.NextRun.Unix(), Valid: true}
+	}
+
+	result, err := db.conn.Exec(`
+		INSERT INTO sync_jobs (
+			name, local_path, remote_path, server_credential_id,
+			sync_mode, trigger_mode, trigger_params, conflict_resolution,
+			network_conditions, enabled, last_run, next_run,
+			created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		job.Name, job.LocalPath, job.RemotePath, job.ServerCredentialID,
+		job.SyncMode, job.TriggerMode, job.TriggerParams, job.ConflictResolution,
+		job.NetworkConditions, job.Enabled, lastRunUnix, nextRunUnix,
+		now, now,
+	)
+	if err != nil {
+		return fmt.Errorf("insert sync job: %w", err)
+	}
+
+	id, err := result.LastInsertId()
+	if err != nil {
+		return fmt.Errorf("get last insert id: %w", err)
+	}
+
+	job.ID = id
+	job.CreatedAt = time.Unix(now, 0)
+	job.UpdatedAt = time.Unix(now, 0)
+
+	return nil
+}
+
+// UpdateSyncJob updates an existing sync job
+func (db *DB) UpdateSyncJob(job *SyncJob) error {
+	now := time.Now().Unix()
+
+	var lastRunUnix, nextRunUnix sql.NullInt64
+	if job.LastRun != nil {
+		lastRunUnix = sql.NullInt64{Int64: job.LastRun.Unix(), Valid: true}
+	}
+	if job.NextRun != nil {
+		nextRunUnix = sql.NullInt64{Int64: job.NextRun.Unix(), Valid: true}
+	}
+
+	result, err := db.conn.Exec(`
+		UPDATE sync_jobs SET
+			name = ?, local_path = ?, remote_path = ?, server_credential_id = ?,
+			sync_mode = ?, trigger_mode = ?, trigger_params = ?, conflict_resolution = ?,
+			network_conditions = ?, enabled = ?, last_run = ?, next_run = ?,
+			updated_at = ?
+		WHERE id = ?
+	`,
+		job.Name, job.LocalPath, job.RemotePath, job.ServerCredentialID,
+		job.SyncMode, job.TriggerMode, job.TriggerParams, job.ConflictResolution,
+		job.NetworkConditions, job.Enabled, lastRunUnix, nextRunUnix,
+		now, job.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("update sync job: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("get rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("sync job not found: %d", job.ID)
+	}
+
+	job.UpdatedAt = time.Unix(now, 0)
+	return nil
+}
+
+// DeleteSyncJob deletes a sync job by ID
+func (db *DB) DeleteSyncJob(jobID int64) error {
+	result, err := db.conn.Exec(`DELETE FROM sync_jobs WHERE id = ?`, jobID)
+	if err != nil {
+		return fmt.Errorf("delete sync job: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("get rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("sync job not found: %d", jobID)
+	}
+
+	return nil
+}
+
+// --- App Config ---
+
+// GetAppConfig retrieves an app config value
+func (db *DB) GetAppConfig(key string) (string, error) {
+	var value string
+	err := db.conn.QueryRow(`SELECT value FROM app_config WHERE key = ?`, key).Scan(&value)
+	if err == sql.ErrNoRows {
+		return "", nil // Return empty string if not found
+	}
+	if err != nil {
+		return "", fmt.Errorf("get app config: %w", err)
+	}
+	return value, nil
+}
+
+// SetAppConfig sets an app config value
+func (db *DB) SetAppConfig(key, value, valueType string) error {
+	now := time.Now().Unix()
+	_, err := db.conn.Exec(`
+		INSERT INTO app_config (key, value, value_type, updated_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(key) DO UPDATE SET
+			value = excluded.value,
+			value_type = excluded.value_type,
+			updated_at = excluded.updated_at
+	`, key, value, valueType, now)
+	if err != nil {
+		return fmt.Errorf("set app config: %w", err)
+	}
+	return nil
+}
+
+// GetAllAppConfig retrieves all app config values
+func (db *DB) GetAllAppConfig() (map[string]string, error) {
+	rows, err := db.conn.Query(`SELECT key, value FROM app_config`)
+	if err != nil {
+		return nil, fmt.Errorf("query app config: %w", err)
+	}
+	defer rows.Close()
+
+	config := make(map[string]string)
+	for rows.Next() {
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			return nil, fmt.Errorf("scan app config: %w", err)
+		}
+		config[key] = value
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate app config: %w", err)
+	}
+
+	return config, nil
+}
+
+// --- SMB Servers CRUD ---
+
+// GetAllSMBServers retrieves all SMB server configurations
+func (db *DB) GetAllSMBServers() ([]*SMBServer, error) {
+	rows, err := db.conn.Query(`
+		SELECT id, name, host, port, username, domain, credential_id,
+			   smb_version, last_connection_test, last_connection_status,
+			   created_at, updated_at
+		FROM smb_servers
+		ORDER BY name ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("query smb servers: %w", err)
+	}
+	defer rows.Close()
+
+	var servers []*SMBServer
+	for rows.Next() {
+		var s SMBServer
+		var domain, smbVersion, connStatus sql.NullString
+		var lastConnTest sql.NullInt64
+		var createdAt, updatedAt int64
+
+		err := rows.Scan(
+			&s.ID, &s.Name, &s.Host, &s.Port, &s.Username,
+			&domain, &s.CredentialID, &smbVersion, &lastConnTest, &connStatus,
+			&createdAt, &updatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan smb server: %w", err)
+		}
+
+		if domain.Valid {
+			s.Domain = domain.String
+		}
+		if smbVersion.Valid {
+			s.SMBVersion = smbVersion.String
+		}
+		if connStatus.Valid {
+			s.LastConnectionStatus = connStatus.String
+		}
+		if lastConnTest.Valid {
+			t := time.Unix(lastConnTest.Int64, 0)
+			s.LastConnectionTest = &t
+		}
+		s.CreatedAt = time.Unix(createdAt, 0)
+		s.UpdatedAt = time.Unix(updatedAt, 0)
+
+		servers = append(servers, &s)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate smb servers: %w", err)
+	}
+
+	return servers, nil
+}
+
+// GetSMBServer retrieves a single SMB server by ID
+func (db *DB) GetSMBServer(id int64) (*SMBServer, error) {
+	var s SMBServer
+	var domain, smbVersion, connStatus sql.NullString
+	var lastConnTest sql.NullInt64
+	var createdAt, updatedAt int64
+
+	err := db.conn.QueryRow(`
+		SELECT id, name, host, port, username, domain, credential_id,
+			   smb_version, last_connection_test, last_connection_status,
+			   created_at, updated_at
+		FROM smb_servers
+		WHERE id = ?
+	`, id).Scan(
+		&s.ID, &s.Name, &s.Host, &s.Port, &s.Username,
+		&domain, &s.CredentialID, &smbVersion, &lastConnTest, &connStatus,
+		&createdAt, &updatedAt,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get smb server: %w", err)
+	}
+
+	if domain.Valid {
+		s.Domain = domain.String
+	}
+	if smbVersion.Valid {
+		s.SMBVersion = smbVersion.String
+	}
+	if connStatus.Valid {
+		s.LastConnectionStatus = connStatus.String
+	}
+	if lastConnTest.Valid {
+		t := time.Unix(lastConnTest.Int64, 0)
+		s.LastConnectionTest = &t
+	}
+	s.CreatedAt = time.Unix(createdAt, 0)
+	s.UpdatedAt = time.Unix(updatedAt, 0)
+
+	return &s, nil
+}
+
+// CreateSMBServer creates a new SMB server configuration
+func (db *DB) CreateSMBServer(server *SMBServer) error {
+	now := time.Now().Unix()
+
+	// Generate credential_id from host only
+	server.CredentialID = server.Host
+
+	result, err := db.conn.Exec(`
+		INSERT INTO smb_servers (
+			name, host, port, username, domain, credential_id,
+			smb_version, created_at, updated_at
+		) VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?)
+	`,
+		server.Name, server.Host, server.Port, server.Username,
+		server.Domain, server.CredentialID, server.SMBVersion, now, now,
+	)
+	if err != nil {
+		return fmt.Errorf("insert smb server: %w", err)
+	}
+
+	id, err := result.LastInsertId()
+	if err != nil {
+		return fmt.Errorf("get last insert id: %w", err)
+	}
+
+	server.ID = id
+	server.CreatedAt = time.Unix(now, 0)
+	server.UpdatedAt = time.Unix(now, 0)
+
+	return nil
+}
+
+// UpdateSMBServer updates an existing SMB server configuration
+func (db *DB) UpdateSMBServer(server *SMBServer) error {
+	now := time.Now().Unix()
+
+	// Update credential_id from host only
+	server.CredentialID = server.Host
+
+	result, err := db.conn.Exec(`
+		UPDATE smb_servers SET
+			name = ?, host = ?, port = ?, username = ?,
+			domain = NULLIF(?, ''), credential_id = ?, smb_version = NULLIF(?, ''), updated_at = ?
+		WHERE id = ?
+	`,
+		server.Name, server.Host, server.Port, server.Username,
+		server.Domain, server.CredentialID, server.SMBVersion, now, server.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("update smb server: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("get rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("smb server not found: %d", server.ID)
+	}
+
+	server.UpdatedAt = time.Unix(now, 0)
+	return nil
+}
+
+// DeleteSMBServer deletes an SMB server configuration by ID
+func (db *DB) DeleteSMBServer(id int64) error {
+	result, err := db.conn.Exec(`DELETE FROM smb_servers WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete smb server: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("get rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("smb server not found: %d", id)
+	}
+
+	return nil
+}
+
+// UpdateSMBServerConnectionStatus updates the connection test status
+func (db *DB) UpdateSMBServerConnectionStatus(id int64, status string) error {
+	now := time.Now().Unix()
+	_, err := db.conn.Exec(`
+		UPDATE smb_servers SET
+			last_connection_test = ?, last_connection_status = ?, updated_at = ?
+		WHERE id = ?
+	`, now, status, now, id)
+	if err != nil {
+		return fmt.Errorf("update connection status: %w", err)
+	}
+	return nil
 }

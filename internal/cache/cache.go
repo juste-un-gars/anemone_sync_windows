@@ -55,11 +55,19 @@ func NewCacheManager(db *database.DB, logger *zap.Logger) *CacheManager {
 }
 
 // GetCachedState retrieves the cached state for a file
-// Returns nil if the file is not in cache
+// Returns nil if the file is not in cache OR if it has never been synced (last_sync is NULL).
+// A file that exists in files_state but has never been synced is considered "not cached"
+// for the purpose of 3-way merge detection.
 func (cm *CacheManager) GetCachedState(jobID int64, localPath string) (*FileInfo, error) {
 	state, err := cm.db.GetFileState(jobID, localPath)
 	if err != nil {
 		// File not in cache is not an error
+		return nil, nil
+	}
+
+	// If file has never been synced (last_sync is NULL), treat it as "not in cache"
+	// This prevents new local files from being detected as "deleted remotely"
+	if state.LastSync == nil {
 		return nil, nil
 	}
 
@@ -226,7 +234,9 @@ func (cm *CacheManager) hasFileChanged(cached, current *FileInfo) bool {
 	return false
 }
 
-// GetAllCachedFiles retrieves all files in cache for a job
+// GetAllCachedFiles retrieves all files in cache for a job that have been synced at least once.
+// Files that have never been synced (last_sync is NULL) are excluded, as they are considered
+// "not cached" for the purpose of 3-way merge detection.
 func (cm *CacheManager) GetAllCachedFiles(jobID int64) (map[string]*FileInfo, error) {
 	states, err := cm.db.GetAllFileStates(jobID)
 	if err != nil {
@@ -235,6 +245,10 @@ func (cm *CacheManager) GetAllCachedFiles(jobID int64) (map[string]*FileInfo, er
 
 	result := make(map[string]*FileInfo, len(states))
 	for _, state := range states {
+		// Skip files that have never been synced
+		if state.LastSync == nil {
+			continue
+		}
 		result[state.LocalPath] = &FileInfo{
 			Path:  state.LocalPath,
 			Size:  state.Size,
