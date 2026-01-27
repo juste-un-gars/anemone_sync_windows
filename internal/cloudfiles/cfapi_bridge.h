@@ -133,4 +133,13 @@ int32_t CfapiBridgeIsInitialized(void);
 // Get the number of pending requests in the queue
 int32_t CfapiBridgeGetQueueCount(void);
 
+// Acknowledge FETCH_PLACEHOLDERS callback (tell Windows we're done populating)
+// connectionKey: the connection key
+// transferKey: the transfer key from the callback
+// Returns CFAPI_BRIDGE_OK on success
+int32_t CfapiBridgeAckFetchPlaceholders(
+    int64_t connectionKey,
+    int64_t transferKey
+);
+
 #endif // CFAPI_BRIDGE_H

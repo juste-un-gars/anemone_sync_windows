@@ -2,9 +2,9 @@
 
 Ce fichier contient un index court de chaque session. Les details sont dans `sessions/session_XXX.md`.
 
-**Derniere session**: 050 (2026-01-27)
-**Phase en cours**: Cloud Files API - CGO Bridge implemente
-**Prochaine session**: 051 - Tester CGO Bridge avec hydratation reelle
+**Derniere session**: 051 (2026-01-27)
+**Phase en cours**: Cloud Files API - FETCH_PLACEHOLDERS partiellement resolu
+**Prochaine session**: 052 - Resoudre creation fichiers dans sync root
 
 ---
 
@@ -208,30 +208,31 @@ Ce fichier contient un index court de chaque session. Les details sont dans `ses
 **Status**: Done | **Phase**: CGO Bridge Cloud Files
 **Resume**: Wrapper CGO complet (cfapi_bridge.c/h/go), evite Go scheduler issues, compilation OK, 55 tests
 
+## Session 051 - 2026-01-27
+**Status**: Partial | **Phase**: Test CGO Bridge
+**Resume**: Active UseCGOBridge, FETCH_PLACEHOLDERS callback + debounce, dossier accessible mais creation fichier bloque
+
 ---
 
 ## Bugs connus
 
-- **Cloud Files API**: CGO Bridge implemente mais pas encore teste en conditions reelles (Session 050)
-  - Wrapper CGO cree pour isoler callbacks Windows du scheduler Go
-  - A tester: hydratation en ouvrant un fichier placeholder dans l'Explorateur
+- **Cloud Files API**: Dossier sync root accessible mais creation de fichiers bloque (Session 051)
+  - FETCH_PLACEHOLDERS callback implemente avec debounce
+  - CfExecute TRANSFER_PLACEHOLDERS retourne E_INVALIDARG (structure incorrecte)
+  - Workaround: retour sans CfExecute + debounce 1s
+  - A investiguer: callbacks NOTIFY_* pour creation/modification fichiers
 
 ## Prochaines etapes
 
-### Session 051 - Test CGO Bridge
+### Session 052 - Creation fichiers dans sync root
 
-**Tests a effectuer:**
-1. Creer un job avec `UseCGOBridge: true`
-2. Initialiser le provider et creer des placeholders
-3. Ouvrir un fichier placeholder dans l'Explorateur
-4. Verifier que l'hydratation fonctionne sans bloquer le dossier
-5. Tester plusieurs fichiers simultanement
+**Probleme actuel:**
+- Dossier s'ouvre correctement
+- Creation de fichier bloque (operation cloud n'a pas termine)
+- Peut necessiter callback supplementaire (VALIDATE_DATA? NOTIFY_FILE_OPEN_COMPLETION?)
 
-**Fichiers crees Session 050:**
-- `internal/cloudfiles/cfapi_bridge.h` - Headers C
-- `internal/cloudfiles/cfapi_bridge.c` - Implementation C (queue thread-safe, callbacks)
-- `internal/cloudfiles/cfapi_bridge.go` - Wrapper Go CGO (BridgeManager, worker loop)
-
-**Autres taches possibles:**
-- TEST7: Exclusions (Thumbs.db, .git/, node_modules/)
-- TEST8: Erreurs/Resilience (fichier verrouille, read-only)
+**Pistes:**
+1. Ajouter logs debug pour voir quel callback est appele lors de creation fichier
+2. Implementer callbacks manquants (VALIDATE_DATA, FILE_OPEN_COMPLETION, etc.)
+3. Verifier si le probleme vient de la policy d'hydratation (FULL vs PROGRESSIVE)
+4. Alternative: desactiver Cloud Files API si trop complexe et garder sync traditionnelle

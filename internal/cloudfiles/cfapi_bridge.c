@@ -251,7 +251,14 @@ static void CALLBACK OnFetchDataCallback(
     const CF_CALLBACK_INFO* callbackInfo,
     const CF_CALLBACK_PARAMETERS* callbackParameters
 ) {
-    if (!g_initialized) return;
+    fprintf(stderr, "[CFAPI Bridge C] OnFetchDataCallback CALLED!\n");
+    fflush(stderr);
+
+    if (!g_initialized) {
+        fprintf(stderr, "[CFAPI Bridge C] ERROR: not initialized\n");
+        fflush(stderr);
+        return;
+    }
 
     CfapiBridgeRequest req;
     memset(&req, 0, sizeof(req));
@@ -275,10 +282,16 @@ static void CALLBACK OnFetchDataCallback(
     }
 
     // Enqueue for Go to process
+    fprintf(stderr, "[CFAPI Bridge C] Enqueuing FETCH_DATA request for: %ls\n", req.filePath);
+    fflush(stderr);
+
     int result = EnqueueRequest(&req);
     if (result != CFAPI_BRIDGE_OK) {
-        fprintf(stderr, "[CFAPI Bridge] Queue full, dropping FETCH_DATA request\n");
+        fprintf(stderr, "[CFAPI Bridge C] Queue full, dropping FETCH_DATA request\n");
+    } else {
+        fprintf(stderr, "[CFAPI Bridge C] FETCH_DATA request enqueued successfully, queue count=%d\n", g_queueCount);
     }
+    fflush(stderr);
 }
 
 // CANCEL_FETCH_DATA callback - hydration was cancelled
@@ -329,6 +342,56 @@ static void CALLBACK OnNotifyDeleteCallback(
     }
 
     EnqueueRequest(&req);
+}
+
+// Debounce for FETCH_PLACEHOLDERS - track last call time per path
+static DWORD g_lastFetchPlaceholdersTime = 0;
+static wchar_t g_lastFetchPlaceholdersPath[CFAPI_BRIDGE_MAX_PATH] = {0};
+
+// FETCH_PLACEHOLDERS callback - Windows wants us to populate a directory
+static void CALLBACK OnFetchPlaceholdersCallback(
+    const CF_CALLBACK_INFO* callbackInfo,
+    const CF_CALLBACK_PARAMETERS* callbackParameters
+) {
+    (void)callbackParameters;
+
+    if (!g_initialized) {
+        return;
+    }
+
+    DWORD now = GetTickCount();
+    const wchar_t* path = callbackInfo->NormalizedPath ? callbackInfo->NormalizedPath : L"";
+
+    // Debounce: skip if same path within 1 second
+    if (wcscmp(path, g_lastFetchPlaceholdersPath) == 0 && (now - g_lastFetchPlaceholdersTime) < 1000) {
+        return;
+    }
+
+    // Update debounce state
+    wcsncpy(g_lastFetchPlaceholdersPath, path, CFAPI_BRIDGE_MAX_PATH - 1);
+    g_lastFetchPlaceholdersPath[CFAPI_BRIDGE_MAX_PATH - 1] = L'\0';
+    g_lastFetchPlaceholdersTime = now;
+
+    fprintf(stderr, "[CFAPI Bridge C] FETCH_PLACEHOLDERS: path=%ls\n", path);
+    fflush(stderr);
+
+    // Acknowledge the callback - we pre-populate placeholders ourselves
+    CfapiBridgeAckFetchPlaceholders(
+        (int64_t)callbackInfo->ConnectionKey,
+        (int64_t)callbackInfo->TransferKey
+    );
+}
+
+// CANCEL_FETCH_PLACEHOLDERS callback
+static void CALLBACK OnCancelFetchPlaceholdersCallback(
+    const CF_CALLBACK_INFO* callbackInfo,
+    const CF_CALLBACK_PARAMETERS* callbackParameters
+) {
+    (void)callbackParameters;
+    (void)callbackInfo;
+
+    fprintf(stderr, "[CFAPI Bridge C] OnCancelFetchPlaceholdersCallback CALLED!\n");
+    fflush(stderr);
 }
 
 // NOTIFY_RENAME callback - file is being renamed
@@ -448,10 +511,10 @@ int32_t CfapiBridgeConnect(
     }
 
     // Build callback registration table
-    CF_CALLBACK_REGISTRATION callbacks[5];
+    CF_CALLBACK_REGISTRATION callbacks[8];
     int idx = 0;
 
-    // FETCH_DATA
+    // FETCH_DATA - for hydration (required for Files On Demand)
     callbacks[idx].Type = CF_CALLBACK_TYPE_FETCH_DATA;
     callbacks[idx].Callback = OnFetchDataCallback;
     idx++;
@@ -461,12 +524,22 @@ int32_t CfapiBridgeConnect(
     callbacks[idx].Callback = OnCancelFetchDataCallback;
     idx++;
 
-    // NOTIFY_DELETE
+    // FETCH_PLACEHOLDERS - required even with FULL policy
+    callbacks[idx].Type = CF_CALLBACK_TYPE_FETCH_PLACEHOLDERS;
+    callbacks[idx].Callback = OnFetchPlaceholdersCallback;
+    idx++;
+
+    // CANCEL_FETCH_PLACEHOLDERS
+    callbacks[idx].Type = CF_CALLBACK_TYPE_CANCEL_FETCH_PLACEHOLDERS;
+    callbacks[idx].Callback = OnCancelFetchPlaceholdersCallback;
+    idx++;
+
+    // NOTIFY_DELETE - file deletion notification
     callbacks[idx].Type = CF_CALLBACK_TYPE_NOTIFY_DELETE;
     callbacks[idx].Callback = OnNotifyDeleteCallback;
     idx++;
 
-    // NOTIFY_RENAME
+    // NOTIFY_RENAME - file rename notification
     callbacks[idx].Type = CF_CALLBACK_TYPE_NOTIFY_RENAME;
     callbacks[idx].Callback = OnNotifyRenameCallback;
     idx++;
@@ -476,6 +549,10 @@ int32_t CfapiBridgeConnect(
     callbacks[idx].Callback = NULL;
 
     // Connect
+    fprintf(stderr, "[CFAPI Bridge C] Calling CfConnectSyncRoot for: %ls\n", syncRootPath);
+    fprintf(stderr, "[CFAPI Bridge C] Registering %d callbacks\n", idx);
+    fflush(stderr);
+
     CF_CONNECTION_KEY connKey;
     HRESULT hr = g_pfnCfConnectSyncRoot(
         syncRootPath,
@@ -485,10 +562,17 @@ int32_t CfapiBridgeConnect(
         &connKey
     );
 
+    fprintf(stderr, "[CFAPI Bridge C] CfConnectSyncRoot result: HRESULT=0x%08lX\n", hr);
+    fflush(stderr);
+
     if (FAILED(hr)) {
-        fprintf(stderr, "[CFAPI Bridge] CfConnectSyncRoot failed: 0x%08lX\n", hr);
+        fprintf(stderr, "[CFAPI Bridge C] CfConnectSyncRoot FAILED: 0x%08lX\n", hr);
+        fflush(stderr);
         return CFAPI_BRIDGE_ERROR_API_FAILED;
     }
+
+    fprintf(stderr, "[CFAPI Bridge C] CfConnectSyncRoot SUCCESS, connectionKey=%lld\n", (long long)connKey);
+    fflush(stderr);
 
     *connectionKey = (int64_t)connKey;
     return CFAPI_BRIDGE_OK;
@@ -692,4 +776,48 @@ int32_t CfapiBridgeGetQueueCount(void) {
     LeaveCriticalSection(&g_queueCS);
 
     return count;
+}
+
+// Simple structure for TRANSFER_PLACEHOLDERS params
+typedef struct {
+    DWORD Flags;
+    HRESULT CompletionStatus;
+    LARGE_INTEGER PlaceholderTotalCount;
+} CF_OPERATION_TRANSFER_PLACEHOLDERS_PARAMS_SIMPLE;
+
+int32_t CfapiBridgeAckFetchPlaceholders(
+    int64_t connectionKey,
+    int64_t transferKey
+) {
+    if (!g_initialized) {
+        return CFAPI_BRIDGE_ERROR_NOT_INITIALIZED;
+    }
+
+    CF_OPERATION_INFO opInfo;
+    memset(&opInfo, 0, sizeof(opInfo));
+    opInfo.StructSize = sizeof(CF_OPERATION_INFO);
+    opInfo.Type = CF_OPERATION_TYPE_TRANSFER_PLACEHOLDERS;
+    opInfo.ConnectionKey = (CF_CONNECTION_KEY)connectionKey;
+    opInfo.TransferKey = (CF_TRANSFER_KEY)transferKey;
+
+    CF_OPERATION_PARAMETERS opParams;
+    memset(&opParams, 0, sizeof(opParams));
+    opParams.ParamSize = sizeof(CF_OPERATION_PARAMETERS);
+
+    // Use the simple params embedded in the union
+    CF_OPERATION_TRANSFER_PLACEHOLDERS_PARAMS_SIMPLE* tpParams =
+        (CF_OPERATION_TRANSFER_PLACEHOLDERS_PARAMS_SIMPLE*)&opParams.Reserved[0];
+    tpParams->Flags = 0x00000001; // CF_OPERATION_TRANSFER_PLACEHOLDERS_FLAG_DISABLE_ON_DEMAND_POPULATION
+    tpParams->CompletionStatus = S_OK;
+    tpParams->PlaceholderTotalCount.QuadPart = 0;
+
+    HRESULT hr = g_pfnCfExecute(&opInfo, &opParams);
+
+    if (FAILED(hr)) {
+        fprintf(stderr, "[CFAPI Bridge C] CfExecute (AckFetchPlaceholders) FAILED: 0x%08lX\n", hr);
+        fflush(stderr);
+        return CFAPI_BRIDGE_ERROR_API_FAILED;
+    }
+
+    return CFAPI_BRIDGE_OK;
 }
