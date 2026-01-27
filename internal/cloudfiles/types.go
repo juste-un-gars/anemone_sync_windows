@@ -148,12 +148,18 @@ func NewDefaultSyncPolicies() *CF_SYNC_POLICIES {
 			Modifier: CF_HYDRATION_POLICY_MODIFIER_AUTO_DEHYDRATION_ALLOWED,
 		},
 		Population: CF_POPULATION_POLICY{
-			Primary:  CF_POPULATION_POLICY_ALWAYS_FULL, // Provider manages placeholders itself
+			// Use ALWAYS_FULL - provider pre-populates placeholders, no FETCH_PLACEHOLDERS callback needed
+			// With this policy, we should NOT register FETCH_PLACEHOLDERS callback
+			Primary:  CF_POPULATION_POLICY_ALWAYS_FULL,
 			Modifier: CF_POPULATION_POLICY_MODIFIER_NONE,
 		},
-		InSync:                CF_INSYNC_POLICY_TRACK_ALL,
-		HardLink:              CF_HARDLINK_POLICY_NONE,
-		PlaceholderManagement: CF_PLACEHOLDER_MANAGEMENT_POLICY_DEFAULT,
+		InSync:   CF_INSYNC_POLICY_TRACK_ALL,
+		HardLink: CF_HARDLINK_POLICY_NONE,
+		// Allow non-provider processes to create/convert/update placeholders
+		// This prevents file creation from being blocked in the sync root
+		PlaceholderManagement: CF_PLACEHOLDER_MANAGEMENT_POLICY_CREATE_UNRESTRICTED |
+			CF_PLACEHOLDER_MANAGEMENT_POLICY_CONVERT_UNRESTRICTED |
+			CF_PLACEHOLDER_MANAGEMENT_POLICY_UPDATE_UNRESTRICTED,
 	}
 	policies.StructSize = uint32(unsafe.Sizeof(*policies))
 	return policies

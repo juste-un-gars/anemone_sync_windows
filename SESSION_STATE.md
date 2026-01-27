@@ -2,9 +2,9 @@
 
 Ce fichier contient un index court de chaque session. Les details sont dans `sessions/session_XXX.md`.
 
-**Derniere session**: 051 (2026-01-27)
-**Phase en cours**: Cloud Files API - FETCH_PLACEHOLDERS partiellement resolu
-**Prochaine session**: 052 - Resoudre creation fichiers dans sync root
+**Derniere session**: 054 (2026-01-27)
+**Phase en cours**: Cloud Files API - Navigation OK, creation fichiers a tester
+**Prochaine session**: 055 - Test creation fichiers + finalisation Cloud Files
 
 ---
 
@@ -212,27 +212,123 @@ Ce fichier contient un index court de chaque session. Les details sont dans `ses
 **Status**: Partial | **Phase**: Test CGO Bridge
 **Resume**: Active UseCGOBridge, FETCH_PLACEHOLDERS callback + debounce, dossier accessible mais creation fichier bloque
 
+## Session 052 - 2026-01-27
+**Status**: Partial | **Phase**: Debug Cloud Files - Approche CloudMirror
+**Resume**: Decouverte sample Microsoft, FileIdentity fix, placeholders crees OK mais dossier inaccessible
+
+## Session 053 - 2026-01-27
+**Status**: Done | **Phase**: Debug Cloud Files - Logs detailles
+**Resume**: Ajout logs debug complets dans bridge C, fix FETCH_PLACEHOLDERS incompatible avec ALWAYS_FULL
+
+## Session 054 - 2026-01-27
+**Status**: Partial | **Phase**: Debug Cloud Files - Fix navigation
+**Resume**: Fix debounce callback, navigation OK, creation fichiers boucle infinie a resoudre
+
 ---
 
 ## Bugs connus
 
-- **Cloud Files API**: Dossier sync root accessible mais creation de fichiers bloque (Session 051)
-  - FETCH_PLACEHOLDERS callback implemente avec debounce
-  - CfExecute TRANSFER_PLACEHOLDERS retourne E_INVALIDARG (structure incorrecte)
-  - Workaround: retour sans CfExecute + debounce 1s
-  - A investiguer: callbacks NOTIFY_* pour creation/modification fichiers
+- **Cloud Files API**: Creation fichiers dans sync root - a tester avec config ALWAYS_FULL sans FETCH_PLACEHOLDERS
 
-## Prochaines etapes
+## Decouvertes Session 054
 
-### Session 052 - Creation fichiers dans sync root
+### PROBLEME RESOLU: Dossier inaccessible
+**Cause**: Le debounce dans `OnFetchPlaceholdersCallback` faisait `return` sans repondre au callback.
+Windows attendait une reponse qui ne venait jamais = freeze.
 
-**Probleme actuel:**
-- Dossier s'ouvre correctement
-- Creation de fichier bloque (operation cloud n'a pas termine)
-- Peut necessiter callback supplementaire (VALIDATE_DATA? NOTIFY_FILE_OPEN_COMPLETION?)
+**Solution**: Toujours repondre aux callbacks, meme si debounce.
 
-**Pistes:**
-1. Ajouter logs debug pour voir quel callback est appele lors de creation fichier
-2. Implementer callbacks manquants (VALIDATE_DATA, FILE_OPEN_COMPLETION, etc.)
-3. Verifier si le probleme vient de la policy d'hydratation (FULL vs PROGRESSIVE)
-4. Alternative: desactiver Cloud Files API si trop complexe et garder sync traditionnelle
+### Ce qui fonctionne maintenant:
+- Navigation dans le dossier sync root (entrer/sortir multiple fois)
+- Callbacks FETCH_PLACEHOLDERS recus et traites correctement
+- Logs debug complets dans cfapi_bridge.c
+
+### Nouveau probleme: Creation fichiers
+- Avec `CF_POPULATION_POLICY_PARTIAL` + `FETCH_PLACEHOLDERS`: boucle infinie de callbacks
+- Windows rappelle FETCH_PLACEHOLDERS en continu quand on cree un fichier
+
+### Configuration actuelle (a tester):
+- `CF_POPULATION_POLICY_ALWAYS_FULL` (provider gere tout)
+- `FETCH_PLACEHOLDERS` **non enregistre** (coherent avec ALWAYS_FULL)
+- Tous les autres callbacks enregistres (FETCH_DATA, VALIDATE_DATA, NOTIFY_*)
+
+### Fichiers modifies Session 054:
+- `internal/cloudfiles/cfapi_bridge.c` - Fix debounce, retire FETCH_PLACEHOLDERS
+- `internal/cloudfiles/types.go` - Retour a ALWAYS_FULL
+
+## Decouvertes Session 052
+
+### Ce qui fonctionne maintenant:
+- Placeholders crees avec succes (`HRESULT=0x00000000, processed=1/1`)
+- FileIdentity obligatoire corrige (utilise path comme identity)
+- Policy PLACEHOLDER_MANAGEMENT = UNRESTRICTED
+- Flag CF_REGISTER_FLAG_UPDATE pour forcer mise a jour policies
+- Population placeholders automatique au demarrage
+
+### Ce qui ne fonctionne PAS:
+- Acces au dossier sync root bloque meme avec app en cours d'execution
+- Erreur "Le fournisseur de fichier cloud n'est pas en cours d'execution" quand app fermee
+
+### Decouvertes importantes (recherche web):
+1. **Sample CloudMirror Microsoft n'implemente PAS FETCH_PLACEHOLDERS**
+   - Ils creent les placeholders a l'avance avec CfCreatePlaceholders
+   - Seulement FETCH_DATA et CANCEL_FETCH_DATA sont enregistres
+
+2. **FileIdentity est OBLIGATOIRE pour les fichiers**
+   - Documentation: "FileIdentity is required for files (not for directories)"
+   - On utilisait le path comme identity (comme CloudMirror)
+
+3. **CF_HYDRATION_POLICY_ALWAYS_FULL interdit CfCreatePlaceholders**
+   - Notre code utilise FULL (2) pas ALWAYS_FULL (3) donc OK
+
+4. **CFAPI ne gere PAS la creation de fichiers locaux**
+   - Il faut ReadDirectoryChangesW ou USN Journal pour detecter
+   - Pas de callback automatique pour nouveaux fichiers
+
+## Decouvertes Session 053
+
+### Comportement observe:
+- **Dossier accessible UNE SEULE FOIS** apres lancement app
+- Si on sort et re-entre, dossier bloque (meme avec app en cours)
+- Apres redemarrage app: fonctionne encore une fois puis bloque
+
+### Probleme identifie:
+- FETCH_PLACEHOLDERS etait enregistre mais on utilise CF_POPULATION_POLICY_ALWAYS_FULL
+- C'est **INCOMPATIBLE**: ALWAYS_FULL = provider gere tout, pas de callback FETCH_PLACEHOLDERS
+- Quand on repondait avec DISABLE_ON_DEMAND_POPULATION, Windows desactivait les callbacks
+
+### Corrections Session 053:
+1. **FETCH_PLACEHOLDERS retire** des callbacks enregistres (incompatible avec ALWAYS_FULL)
+2. **Erreur ALREADY_EXISTS ignoree** (0x800700B7 = fichier existe deja, pas une erreur)
+3. **Logs debug complets** ajoutes dans cfapi_bridge.c avec timestamp
+
+### Fichiers modifies Session 053:
+- `internal/cloudfiles/cfapi_bridge.c` - Logs detailles + FETCH_PLACEHOLDERS retire
+- `internal/cloudfiles/cfapi_placeholder.go` - Ignore erreur ALREADY_EXISTS
+
+## Prochaines etapes (Session 055)
+
+### A tester:
+1. **Navigation**: devrait fonctionner (entrer/sortir du dossier)
+2. **Creation fichiers**: avec ALWAYS_FULL + sans FETCH_PLACEHOLDERS
+3. **Hydration**: ouvrir un fichier placeholder (download depuis serveur)
+
+### Si creation fichiers ne fonctionne pas:
+1. Verifier les logs - quel callback bloque?
+2. Essayer de desactiver certains NOTIFY_* callbacks
+3. Comparer avec CloudMirror qui utilise seulement FETCH_DATA + CANCEL_FETCH_DATA
+
+### Si ca fonctionne:
+1. Nettoyer les callbacks inutiles (garder minimum necessaire)
+2. Tester hydration complete (download fichier)
+3. Tester dehydration (liberer espace)
+4. Integration finale avec sync engine
+
+**Alternative si Cloud Files reste instable:**
+- Garder sync traditionnelle comme fonctionnalite principale
+- Cloud Files en option "beta" ou desactivee par defaut
+
+**Sources utiles:**
+- https://github.com/microsoft/Windows-classic-samples/tree/main/Samples/CloudMirror
+- https://learn.microsoft.com/en-us/answers/questions/2288103/cloud-file-api-faq
+- https://learn.microsoft.com/en-us/windows/win32/api/cfapi/ns-cfapi-cf_placeholder_create_info
