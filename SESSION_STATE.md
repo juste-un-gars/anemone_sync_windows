@@ -2,9 +2,9 @@
 
 Ce fichier contient un index court de chaque session. Les details sont dans `sessions/session_XXX.md`.
 
-**Derniere session**: 048 (2026-01-27)
-**Phase en cours**: CLI complete
-**Prochaine session**: 049 - Debug Cloud Files API ou autres fonctionnalites
+**Derniere session**: 050 (2026-01-27)
+**Phase en cours**: Cloud Files API - CGO Bridge implemente
+**Prochaine session**: 051 - Tester CGO Bridge avec hydratation reelle
 
 ---
 
@@ -200,17 +200,38 @@ Ce fichier contient un index court de chaque session. Les details sont dans `ses
 **Status**: Done | **Phase**: CLI Interface
 **Resume**: CLI complet (--help, --list-jobs, --sync, --sync-all), docs mises a jour
 
+## Session 049 - 2026-01-27
+**Status**: Partial | **Phase**: Debug Cloud Files API
+**Resume**: Investigation approfondie, probleme identifie = callbacks Go incompatibles avec threading Windows
+
+## Session 050 - 2026-01-27
+**Status**: Done | **Phase**: CGO Bridge Cloud Files
+**Resume**: Wrapper CGO complet (cfapi_bridge.c/h/go), evite Go scheduler issues, compilation OK, 55 tests
+
 ---
 
 ## Bugs connus
 
-- **Cloud Files API**: ERROR_CLOUD_FILE_NOT_UNDER_SYNC_ROOT (Session 035)
+- **Cloud Files API**: CGO Bridge implemente mais pas encore teste en conditions reelles (Session 050)
+  - Wrapper CGO cree pour isoler callbacks Windows du scheduler Go
+  - A tester: hydratation en ouvrant un fichier placeholder dans l'Explorateur
 
 ## Prochaines etapes
 
-### Session 049 - Options
+### Session 051 - Test CGO Bridge
 
-**Fonctionnalites possibles:**
-1. Debug Cloud Files API (ERROR_CLOUD_FILE_NOT_UNDER_SYNC_ROOT)
-2. TEST7: Exclusions (Thumbs.db, .git/, node_modules/)
-3. TEST8: Erreurs/Resilience (fichier verrouille, read-only)
+**Tests a effectuer:**
+1. Creer un job avec `UseCGOBridge: true`
+2. Initialiser le provider et creer des placeholders
+3. Ouvrir un fichier placeholder dans l'Explorateur
+4. Verifier que l'hydratation fonctionne sans bloquer le dossier
+5. Tester plusieurs fichiers simultanement
+
+**Fichiers crees Session 050:**
+- `internal/cloudfiles/cfapi_bridge.h` - Headers C
+- `internal/cloudfiles/cfapi_bridge.c` - Implementation C (queue thread-safe, callbacks)
+- `internal/cloudfiles/cfapi_bridge.go` - Wrapper Go CGO (BridgeManager, worker loop)
+
+**Autres taches possibles:**
+- TEST7: Exclusions (Thumbs.db, .git/, node_modules/)
+- TEST8: Erreurs/Resilience (fichier verrouille, read-only)
