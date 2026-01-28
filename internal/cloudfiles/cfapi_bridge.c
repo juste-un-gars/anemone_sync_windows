@@ -3,9 +3,15 @@
 
 #include "cfapi_bridge.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
 #include <time.h>
+
+// Error codes
+#ifndef E_OUTOFMEMORY
+#define E_OUTOFMEMORY ((HRESULT)0x8007000EL)
+#endif
 
 // --- Debug logging ---
 static int g_debugLogging = 1; // Enable verbose debug logging
@@ -90,7 +96,8 @@ typedef enum {
     CF_CALLBACK_RENAME_FLAG_TARGET_IN_SCOPE = 0x00000004
 } CF_CALLBACK_RENAME_FLAGS;
 
-// Callback info structure
+// Callback info structure - must match Windows SDK exactly
+// See: https://learn.microsoft.com/en-us/windows/win32/api/cfapi/ns-cfapi-cf_callback_info
 typedef struct {
     DWORD StructSize;
     CF_CONNECTION_KEY ConnectionKey;
@@ -108,7 +115,7 @@ typedef struct {
     LPCWSTR NormalizedPath;
     CF_TRANSFER_KEY TransferKey;
     BYTE PriorityHint;
-    BYTE Reserved[3];
+    // Note: No explicit Reserved - compiler handles padding automatically
     LPVOID CorrelationVector;
     LPVOID ProcessInfo;
     LONGLONG RequestKey;
@@ -168,11 +175,14 @@ typedef struct {
 } CF_OPERATION_INFO;
 
 // Operation parameters for transfer data
+// MUST match Windows SDK cfapi.h exactly!
+// See: https://learn.microsoft.com/en-us/windows/win32/api/cfapi/ns-cfapi-cf_operation_parameters
 typedef struct {
-    LARGE_INTEGER Offset;
-    LARGE_INTEGER Length;
-    PVOID Buffer;
-    HRESULT CompletionStatus;
+    DWORD Flags;                    // 0-3
+    HRESULT CompletionStatus;       // 4-7
+    LPCVOID Buffer;                 // 8-15 (8 bytes on x64)
+    LARGE_INTEGER Offset;           // 16-23
+    LARGE_INTEGER Length;           // 24-31
 } CF_OPERATION_TRANSFER_DATA_PARAMS;
 
 // Operation parameters for ack data
@@ -204,6 +214,11 @@ static int g_queueCount = 0;
 static CRITICAL_SECTION g_queueCS;
 static HANDLE g_newRequestEvent = NULL;
 static int g_initialized = 0;
+
+// Shared fetch request for thread-safe data transfer
+static CfapiBridgeSharedFetchRequest g_sharedFetchRequest;
+static CRITICAL_SECTION g_sharedFetchCS;
+static int g_sharedFetchInitialized = 0;
 
 // Cloud Files API function pointers (loaded dynamically)
 typedef HRESULT (WINAPI *PFN_CfConnectSyncRoot)(
@@ -279,11 +294,45 @@ static int DequeueRequest(CfapiBridgeRequest* request) {
 
 // --- Callback Handlers (called by Windows on filter thread) ---
 
+// Helper: Dump raw bytes of a structure
+static void DumpHex(const char* label, const void* data, size_t len) {
+    const unsigned char* p = (const unsigned char*)data;
+    fprintf(stderr, "[CFAPI HEX] %s (%zu bytes):\n", label, len);
+    for (size_t i = 0; i < len; i += 16) {
+        fprintf(stderr, "  +%03zu: ", i);
+        for (size_t j = 0; j < 16 && (i + j) < len; j++) {
+            fprintf(stderr, "%02X ", p[i + j]);
+        }
+        fprintf(stderr, "\n");
+    }
+    fflush(stderr);
+}
+
 // Helper: Print callback info details
 static void PrintCallbackInfo(const char* callbackName, const CF_CALLBACK_INFO* info) {
     DebugLog("=== %s CALLBACK ===", callbackName);
+    DebugLog("  StructSize from Windows: %u", info->StructSize);
+    DebugLog("  sizeof(CF_CALLBACK_INFO) in our code: %zu", sizeof(CF_CALLBACK_INFO));
+    DebugLog("  offsetof(RequestKey) in our code: %zu", (size_t)((char*)&info->RequestKey - (char*)info));
+
+    // Dump raw bytes of the structure to find where RequestKey really is
+    DumpHex("CF_CALLBACK_INFO first 160 bytes", info, 160);
+
     DebugLog("  ConnectionKey: %lld", (long long)info->ConnectionKey);
     DebugLog("  TransferKey: %lld", (long long)info->TransferKey);
+    DebugLog("  RequestKey (at our offset): %lld", (long long)info->RequestKey);
+
+    // Also check bytes 136-152 in case RequestKey is at a different offset
+    DebugLog("  Raw bytes 136-152: %02X %02X %02X %02X %02X %02X %02X %02X | %02X %02X %02X %02X %02X %02X %02X %02X",
+             ((unsigned char*)info)[136], ((unsigned char*)info)[137],
+             ((unsigned char*)info)[138], ((unsigned char*)info)[139],
+             ((unsigned char*)info)[140], ((unsigned char*)info)[141],
+             ((unsigned char*)info)[142], ((unsigned char*)info)[143],
+             ((unsigned char*)info)[144], ((unsigned char*)info)[145],
+             ((unsigned char*)info)[146], ((unsigned char*)info)[147],
+             ((unsigned char*)info)[148], ((unsigned char*)info)[149],
+             ((unsigned char*)info)[150], ((unsigned char*)info)[151]);
+
     DebugLog("  FileId: %lld", (long long)info->FileId);
     DebugLog("  FileSize: %lld", (long long)info->FileSize);
     DebugLog("  SyncRootFileId: %lld", (long long)info->SyncRootFileId);
@@ -293,6 +342,10 @@ static void PrintCallbackInfo(const char* callbackName, const CF_CALLBACK_INFO* 
 }
 
 // FETCH_DATA callback - file needs hydration
+// Now that we've verified CfExecute works (session 059), use the queue approach:
+// 1. Enqueue the request to Go
+// 2. Return immediately (don't block the callback)
+// 3. Go reads from SMB and calls CfapiBridgeTransferData
 static void CALLBACK OnFetchDataCallback(
     const CF_CALLBACK_INFO* callbackInfo,
     const CF_CALLBACK_PARAMETERS* callbackParameters
@@ -304,36 +357,63 @@ static void CALLBACK OnFetchDataCallback(
         return;
     }
 
+    // Extract fetch parameters
+    int64_t requiredOffset = 0;
+    int64_t requiredLength = 0;
+    if (callbackParameters && callbackParameters->ParamSize >= sizeof(DWORD) + sizeof(CF_CALLBACK_PARAMETERS_FETCHDATA)) {
+        requiredOffset = callbackParameters->FetchData.RequiredFileOffset;
+        requiredLength = callbackParameters->FetchData.RequiredLength;
+    }
+
+    // If requiredLength is 0 or negative, use file size
+    if (requiredLength <= 0) {
+        requiredLength = callbackInfo->FileSize - requiredOffset;
+    }
+
+    DebugLog("  FetchData: offset=%lld, length=%lld, fileSize=%lld",
+             (long long)requiredOffset, (long long)requiredLength, (long long)callbackInfo->FileSize);
+
+    // Build request for Go
     CfapiBridgeRequest req;
     memset(&req, 0, sizeof(req));
 
     req.type = CFAPI_CALLBACK_FETCH_DATA;
     req.connectionKey = (int64_t)callbackInfo->ConnectionKey;
     req.transferKey = (int64_t)callbackInfo->TransferKey;
-    req.fileSize = callbackInfo->FileSize;
-    req.isDirectory = 0;
+    req.requestKey = (int64_t)callbackInfo->RequestKey;
+    req.fileSize = (int64_t)callbackInfo->FileSize;
+    req.requiredOffset = requiredOffset;
+    req.requiredLength = requiredLength;
 
-    // Copy normalized path
     if (callbackInfo->NormalizedPath) {
         wcsncpy(req.filePath, callbackInfo->NormalizedPath, CFAPI_BRIDGE_MAX_PATH - 1);
         req.filePath[CFAPI_BRIDGE_MAX_PATH - 1] = L'\0';
     }
 
-    // Extract fetch parameters
-    if (callbackParameters && callbackParameters->ParamSize >= sizeof(DWORD) + sizeof(CF_CALLBACK_PARAMETERS_FETCHDATA)) {
-        req.requiredOffset = callbackParameters->FetchData.RequiredFileOffset;
-        req.requiredLength = callbackParameters->FetchData.RequiredLength;
-        DebugLog("  FetchData: offset=%lld, length=%lld",
-                 (long long)req.requiredOffset, (long long)req.requiredLength);
-    }
-
-    // Enqueue for Go to process
+    // Enqueue the request for Go to process
     int result = EnqueueRequest(&req);
     if (result != CFAPI_BRIDGE_OK) {
-        DebugLog("ERROR: Queue full, dropping FETCH_DATA request!");
-    } else {
-        DebugLog("FETCH_DATA enqueued OK, queue count=%d", g_queueCount);
+        DebugLog("ERROR: Failed to enqueue FETCH_DATA request: %d", result);
+        // Report error to Windows
+        CF_OPERATION_INFO opInfo;
+        memset(&opInfo, 0, sizeof(opInfo));
+        opInfo.StructSize = sizeof(CF_OPERATION_INFO);
+        opInfo.Type = CF_OPERATION_TYPE_TRANSFER_DATA;
+        opInfo.ConnectionKey = callbackInfo->ConnectionKey;
+        opInfo.TransferKey = callbackInfo->TransferKey;
+        opInfo.CorrelationVector = callbackInfo->CorrelationVector;
+
+        CF_OPERATION_PARAMETERS opParams;
+        memset(&opParams, 0, sizeof(opParams));
+        opParams.ParamSize = sizeof(CF_OPERATION_PARAMETERS);
+        opParams.TransferData.CompletionStatus = E_OUTOFMEMORY;
+
+        g_pfnCfExecute(&opInfo, &opParams);
+        return;
     }
+
+    DebugLog("FETCH_DATA enqueued for Go to process");
+    // Callback returns - Go will call CfapiBridgeTransferData later
 }
 
 // CANCEL_FETCH_DATA callback - hydration was cancelled
@@ -524,10 +604,12 @@ static void CALLBACK OnValidateDataCallback(
 ) {
     (void)callbackParameters;
     PrintCallbackInfo("VALIDATE_DATA", callbackInfo);
-    DebugLog("VALIDATE_DATA: Acknowledging validation...");
+    DebugLog("VALIDATE_DATA: Acknowledging validation for entire file (size=%lld)...",
+             (long long)callbackInfo->FileSize);
 
     // Acknowledge validation - required to not block access!
     // We need to call CfExecute with ACK_DATA to acknowledge
+    // IMPORTANT: Must specify RequestKey and the range of data being validated
     if (g_pfnCfExecute) {
         CF_OPERATION_INFO opInfo;
         memset(&opInfo, 0, sizeof(opInfo));
@@ -535,15 +617,19 @@ static void CALLBACK OnValidateDataCallback(
         opInfo.Type = CF_OPERATION_TYPE_ACK_DATA;
         opInfo.ConnectionKey = callbackInfo->ConnectionKey;
         opInfo.TransferKey = callbackInfo->TransferKey;
+        opInfo.RequestKey = callbackInfo->RequestKey;  // Copy RequestKey!
 
         CF_OPERATION_PARAMETERS opParams;
         memset(&opParams, 0, sizeof(opParams));
         opParams.ParamSize = sizeof(CF_OPERATION_PARAMETERS);
         opParams.AckData.Flags = 0;
         opParams.AckData.CompletionStatus = S_OK;
+        opParams.AckData.Offset.QuadPart = 0;  // From beginning
+        opParams.AckData.Length.QuadPart = callbackInfo->FileSize;  // Entire file
 
         HRESULT hr = g_pfnCfExecute(&opInfo, &opParams);
-        DebugLog("VALIDATE_DATA ack result: HRESULT=0x%08lX", hr);
+        DebugLog("VALIDATE_DATA ack result: HRESULT=0x%08lX (offset=0, length=%lld)",
+                 hr, (long long)callbackInfo->FileSize);
     }
 }
 
@@ -619,6 +705,17 @@ int32_t CfapiBridgeInit(void) {
     g_queueTail = 0;
     g_queueCount = 0;
 
+    // Initialize shared fetch for thread-safe data transfer
+    if (CfapiBridgeInitSharedFetch() != CFAPI_BRIDGE_OK) {
+        DebugLog("ERROR: Failed to initialize shared fetch");
+        CloseHandle(g_newRequestEvent);
+        g_newRequestEvent = NULL;
+        DeleteCriticalSection(&g_queueCS);
+        FreeLibrary(g_cldapiModule);
+        g_cldapiModule = NULL;
+        return CFAPI_BRIDGE_ERROR_API_FAILED;
+    }
+
     g_initialized = 1;
     DebugLog("CfapiBridgeInit SUCCESS");
     return CFAPI_BRIDGE_OK;
@@ -628,6 +725,9 @@ void CfapiBridgeCleanup(void) {
     if (!g_initialized) return;
 
     g_initialized = 0;
+
+    // Cleanup shared fetch
+    CfapiBridgeCleanupSharedFetch();
 
     if (g_newRequestEvent) {
         CloseHandle(g_newRequestEvent);
@@ -825,13 +925,15 @@ int32_t CfapiBridgePollRequest(CfapiBridgeRequest* request) {
 int32_t CfapiBridgeTransferData(
     int64_t connectionKey,
     int64_t transferKey,
+    int64_t requestKey,
     const void* buffer,
     int64_t bufferLength,
-    int64_t offset
+    int64_t offset,
+    int32_t flags
 ) {
-    DebugLog("CfapiBridgeTransferData: connKey=%lld, transKey=%lld, len=%lld, offset=%lld",
-             (long long)connectionKey, (long long)transferKey,
-             (long long)bufferLength, (long long)offset);
+    DebugLog("CfapiBridgeTransferData: connKey=%lld, transKey=%lld, reqKey=%lld, len=%lld, offset=%lld, flags=0x%X",
+             (long long)connectionKey, (long long)transferKey, (long long)requestKey,
+             (long long)bufferLength, (long long)offset, flags);
 
     if (!g_initialized) {
         DebugLog("ERROR: Bridge not initialized");
@@ -849,10 +951,12 @@ int32_t CfapiBridgeTransferData(
     opInfo.Type = CF_OPERATION_TYPE_TRANSFER_DATA;
     opInfo.ConnectionKey = (CF_CONNECTION_KEY)connectionKey;
     opInfo.TransferKey = (CF_TRANSFER_KEY)transferKey;
+    opInfo.RequestKey = (LONGLONG)requestKey;
 
     CF_OPERATION_PARAMETERS opParams;
     memset(&opParams, 0, sizeof(opParams));
     opParams.ParamSize = sizeof(CF_OPERATION_PARAMETERS);
+    opParams.TransferData.Flags = (DWORD)flags;  // Use the flags parameter
     opParams.TransferData.CompletionStatus = S_OK;
     opParams.TransferData.Buffer = (PVOID)buffer;
     opParams.TransferData.Offset.QuadPart = offset;
@@ -864,16 +968,17 @@ int32_t CfapiBridgeTransferData(
         return CFAPI_BRIDGE_ERROR_API_FAILED;
     }
 
-    DebugLog("TransferData SUCCESS");
+    DebugLog("TransferData SUCCESS (flags=0x%X)", flags);
     return CFAPI_BRIDGE_OK;
 }
 
 int32_t CfapiBridgeTransferComplete(
     int64_t connectionKey,
-    int64_t transferKey
+    int64_t transferKey,
+    int64_t requestKey
 ) {
-    DebugLog("CfapiBridgeTransferComplete: connKey=%lld, transKey=%lld",
-             (long long)connectionKey, (long long)transferKey);
+    DebugLog("CfapiBridgeTransferComplete: connKey=%lld, transKey=%lld, reqKey=%lld",
+             (long long)connectionKey, (long long)transferKey, (long long)requestKey);
 
     if (!g_initialized) {
         DebugLog("ERROR: Bridge not initialized");
@@ -886,6 +991,7 @@ int32_t CfapiBridgeTransferComplete(
     opInfo.Type = CF_OPERATION_TYPE_ACK_DATA;
     opInfo.ConnectionKey = (CF_CONNECTION_KEY)connectionKey;
     opInfo.TransferKey = (CF_TRANSFER_KEY)transferKey;
+    opInfo.RequestKey = (LONGLONG)requestKey;
 
     CF_OPERATION_PARAMETERS opParams;
     memset(&opParams, 0, sizeof(opParams));
@@ -905,10 +1011,11 @@ int32_t CfapiBridgeTransferComplete(
 int32_t CfapiBridgeTransferError(
     int64_t connectionKey,
     int64_t transferKey,
+    int64_t requestKey,
     int32_t hresult
 ) {
-    DebugLog("CfapiBridgeTransferError: connKey=%lld, transKey=%lld, hr=0x%08X",
-             (long long)connectionKey, (long long)transferKey, hresult);
+    DebugLog("CfapiBridgeTransferError: connKey=%lld, transKey=%lld, reqKey=%lld, hr=0x%08X",
+             (long long)connectionKey, (long long)transferKey, (long long)requestKey, hresult);
 
     if (!g_initialized) {
         DebugLog("ERROR: Bridge not initialized");
@@ -921,6 +1028,7 @@ int32_t CfapiBridgeTransferError(
     opInfo.Type = CF_OPERATION_TYPE_TRANSFER_DATA;
     opInfo.ConnectionKey = (CF_CONNECTION_KEY)connectionKey;
     opInfo.TransferKey = (CF_TRANSFER_KEY)transferKey;
+    opInfo.RequestKey = (LONGLONG)requestKey;
 
     CF_OPERATION_PARAMETERS opParams;
     memset(&opParams, 0, sizeof(opParams));
@@ -1038,4 +1146,88 @@ int32_t CfapiBridgeAckFetchPlaceholders(
 
     DebugLog("AckFetchPlaceholders SUCCESS");
     return CFAPI_BRIDGE_OK;
+}
+
+int32_t CfapiBridgeSignalTransferComplete(void* completionEvent) {
+    if (!completionEvent) {
+        DebugLog("ERROR: CfapiBridgeSignalTransferComplete called with NULL event");
+        return CFAPI_BRIDGE_ERROR_INVALID_PARAM;
+    }
+
+    DebugLog("Signaling transfer complete");
+    if (!SetEvent((HANDLE)completionEvent)) {
+        DebugLog("ERROR: SetEvent failed (error=%lu)", GetLastError());
+        return CFAPI_BRIDGE_ERROR_API_FAILED;
+    }
+
+    return CFAPI_BRIDGE_OK;
+}
+
+// ============================================================================
+// Shared Fetch Request API - for thread-safe data fetching
+// ============================================================================
+
+int32_t CfapiBridgeInitSharedFetch(void) {
+    if (g_sharedFetchInitialized) {
+        return CFAPI_BRIDGE_OK;
+    }
+
+    InitializeCriticalSection(&g_sharedFetchCS);
+    memset(&g_sharedFetchRequest, 0, sizeof(g_sharedFetchRequest));
+
+    // Create synchronization events
+    g_sharedFetchRequest.requestReadyEvent = CreateEventW(NULL, FALSE, FALSE, NULL);
+    g_sharedFetchRequest.dataReadyEvent = CreateEventW(NULL, FALSE, FALSE, NULL);
+
+    if (!g_sharedFetchRequest.requestReadyEvent || !g_sharedFetchRequest.dataReadyEvent) {
+        DebugLog("ERROR: Failed to create shared fetch events");
+        if (g_sharedFetchRequest.requestReadyEvent) CloseHandle(g_sharedFetchRequest.requestReadyEvent);
+        if (g_sharedFetchRequest.dataReadyEvent) CloseHandle(g_sharedFetchRequest.dataReadyEvent);
+        DeleteCriticalSection(&g_sharedFetchCS);
+        return CFAPI_BRIDGE_ERROR_API_FAILED;
+    }
+
+    g_sharedFetchInitialized = 1;
+    DebugLog("Shared fetch initialized");
+    return CFAPI_BRIDGE_OK;
+}
+
+void CfapiBridgeCleanupSharedFetch(void) {
+    if (!g_sharedFetchInitialized) return;
+
+    if (g_sharedFetchRequest.requestReadyEvent) {
+        CloseHandle(g_sharedFetchRequest.requestReadyEvent);
+        g_sharedFetchRequest.requestReadyEvent = NULL;
+    }
+    if (g_sharedFetchRequest.dataReadyEvent) {
+        CloseHandle(g_sharedFetchRequest.dataReadyEvent);
+        g_sharedFetchRequest.dataReadyEvent = NULL;
+    }
+
+    DeleteCriticalSection(&g_sharedFetchCS);
+    g_sharedFetchInitialized = 0;
+}
+
+int32_t CfapiBridgeWaitForData(uint32_t timeoutMs) {
+    if (!g_sharedFetchInitialized) {
+        return CFAPI_BRIDGE_ERROR_NOT_INITIALIZED;
+    }
+
+    DWORD result = WaitForSingleObject(g_sharedFetchRequest.dataReadyEvent, timeoutMs);
+    if (result == WAIT_OBJECT_0) {
+        return CFAPI_BRIDGE_OK;
+    } else if (result == WAIT_TIMEOUT) {
+        return CFAPI_BRIDGE_ERROR_TIMEOUT;
+    }
+    return CFAPI_BRIDGE_ERROR_API_FAILED;
+}
+
+CfapiBridgeSharedFetchRequest* CfapiBridgeGetPendingRequest(void) {
+    return &g_sharedFetchRequest;
+}
+
+void CfapiBridgeSignalDataReady(void) {
+    if (g_sharedFetchInitialized && g_sharedFetchRequest.dataReadyEvent) {
+        SetEvent(g_sharedFetchRequest.dataReadyEvent);
+    }
 }

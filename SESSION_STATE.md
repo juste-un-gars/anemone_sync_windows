@@ -2,23 +2,23 @@
 
 Ce fichier contient un index court de chaque session. Les details sont dans `sessions/session_XXX.md`.
 
-**Derniere session**: 055 (2026-01-28)
-**Phase en cours**: Cloud Files API - Folder accessible offline, hydration a tester
-**Prochaine session**: 056 - Test hydration + finalisation Cloud Files
+**Derniere session**: 062 (2026-01-28)
+**Phase en cours**: Cloud Files API - HYDRATION FONCTIONNE!
+**Prochaine etape**: Tests dehydration, gros fichiers, stabilite
 
 ---
 
 ## Session 001 - 2026-01-11
 **Status**: Done | **Phase**: Phase 0 + Infrastructure
-**Resume**: 35 fichiers, CI/CD, docs, Makefile | **Details**: sessions/session_001.md
+**Resume**: 35 fichiers, CI/CD, docs, Makefile
 
 ## Session 002 - 2026-01-11
 **Status**: Done | **Phase**: Phase 1 Scanner
-**Resume**: 7 modules scanner, 65+ tests | **Details**: sessions/session_002.md
+**Resume**: 7 modules scanner, 65+ tests
 
 ## Session 003 - 2026-01-11
 **Status**: Done | **Phase**: Phase 1 Scanner (fixes)
-**Resume**: 97% tests, fix deadlock/DB | **Details**: sessions/session_003.md
+**Resume**: 97% tests, fix deadlock/DB
 
 ## Session 004 - 2026-01-11
 **Status**: Done | **Phase**: Phase 1 Complete
@@ -178,108 +178,113 @@ Ce fichier contient un index court de chaque session. Les details sont dans `ses
 
 ## Session 043 - 2026-01-25
 **Status**: Done | **Phase**: Refactoring db.go
-**Resume**: db.go 1058->5 fichiers (db.go, db_files.go, db_jobs.go, db_servers.go, db_config.go)
+**Resume**: db.go 1058->5 fichiers
 
 ## Session 044 - 2026-01-25
 **Status**: Done | **Phase**: Bugfixes tests
-**Resume**: Fix UpsertFileState (last_sync), fix SMB tests (ancienne API), fix Scanner tests (SimulateSyncComplete)
+**Resume**: Fix UpsertFileState, SMB tests, Scanner tests
 
 ## Session 045 - 2026-01-25
 **Status**: Done | **Phase**: Refactoring engine.go + app.go
-**Resume**: engine.go 1007->4 fichiers, app.go 1512->6 fichiers, tous < 500 lignes
+**Resume**: engine.go 1007->4 fichiers, app.go 1512->6 fichiers
 
 ## Session 046 - 2026-01-25
 **Status**: Done | **Phase**: Refactoring fichiers > 500 lignes
-**Resume**: 5 fichiers refactores (syncmanager, jobform, smb/client, cloudfiles/provider, cloudfiles/dehydration)
+**Resume**: 5 fichiers refactores
 
 ## Session 047 - 2026-01-25
 **Status**: Done | **Phase**: Refactoring cfapi.go
-**Resume**: cfapi.go 500->4 fichiers (cfapi.go 128, cfapi_syncroot.go 121, cfapi_placeholder.go 115, cfapi_operations.go 175)
+**Resume**: cfapi.go 500->4 fichiers
 
 ## Session 048 - 2026-01-27
 **Status**: Done | **Phase**: CLI Interface
-**Resume**: CLI complet (--help, --list-jobs, --sync, --sync-all), docs mises a jour
+**Resume**: CLI complet (--help, --list-jobs, --sync, --sync-all)
 
 ## Session 049 - 2026-01-27
 **Status**: Partial | **Phase**: Debug Cloud Files API
-**Resume**: Investigation approfondie, probleme identifie = callbacks Go incompatibles avec threading Windows
+**Resume**: Probleme identifie = callbacks Go incompatibles avec threading Windows
 
 ## Session 050 - 2026-01-27
 **Status**: Done | **Phase**: CGO Bridge Cloud Files
-**Resume**: Wrapper CGO complet (cfapi_bridge.c/h/go), evite Go scheduler issues, compilation OK, 55 tests
+**Resume**: Wrapper CGO complet (cfapi_bridge.c/h/go), 55 tests
 
 ## Session 051 - 2026-01-27
 **Status**: Partial | **Phase**: Test CGO Bridge
-**Resume**: Active UseCGOBridge, FETCH_PLACEHOLDERS callback + debounce, dossier accessible mais creation fichier bloque
+**Resume**: FETCH_PLACEHOLDERS callback + debounce, dossier accessible
 
 ## Session 052 - 2026-01-27
 **Status**: Partial | **Phase**: Debug Cloud Files - Approche CloudMirror
-**Resume**: Decouverte sample Microsoft, FileIdentity fix, placeholders crees OK mais dossier inaccessible
+**Resume**: Decouverte sample Microsoft, FileIdentity fix
 
 ## Session 053 - 2026-01-27
 **Status**: Done | **Phase**: Debug Cloud Files - Logs detailles
-**Resume**: Ajout logs debug complets dans bridge C, fix FETCH_PLACEHOLDERS incompatible avec ALWAYS_FULL
+**Resume**: Fix FETCH_PLACEHOLDERS incompatible avec ALWAYS_FULL
 
 ## Session 054 - 2026-01-27
 **Status**: Done | **Phase**: Debug Cloud Files - Fix navigation
-**Resume**: Fix debounce callback, navigation OK avec app running
+**Resume**: Fix debounce callback, navigation OK
 
 ## Session 055 - 2026-01-28
-**Status**: Partial | **Phase**: Cloud Files - Folder accessible offline
-**Resume**: Dossier accessible meme sans provider, fix path hydration, hydration a tester
+**Status**: Done | **Phase**: Cloud Files - Folder accessible offline
+**Resume**: Dossier accessible sans provider, fix path hydration
+
+## Session 056 - 2026-01-28
+**Status**: Partial | **Phase**: Cloud Files - Fix hydration bugs
+**Resume**: 4 bugs corriges, hydration echoue encore
+
+## Session 057 - 2026-01-28
+**Status**: Partial | **Phase**: Cloud Files - Architecture synchrone bloquante
+**Resume**: Decouverte cause racine, nouvelle architecture avec Event Windows
+
+## Session 058 - 2026-01-28
+**Status**: Partial | **Phase**: Cloud Files - Fix crash GC Go
+**Resume**: Crash corrige (unsafe.Pointer -> uintptr pour HANDLE)
+
+## Session 059 - 2026-01-28
+**Status**: Done | **Phase**: Cloud Files - Fix structure C incorrecte
+**Resume**: CfExecute immediat fonctionne! Structure CF_OPERATION_TRANSFER_DATA_PARAMS corrigee
+
+## Session 060 - 2026-01-28
+**Status**: Partial | **Phase**: Cloud Files - Restauration vraie logique hydration
+**Resume**: Supprime code de test, restaure enqueue vers Go. A tester apres reboot.
+
+## Session 061 - 2026-01-28
+**Status**: Done | **Phase**: Cloud Files - Fix MARK_IN_SYNC flag
+**Resume**: Ajout flag MARK_IN_SYNC sur dernier chunk TransferData
+
+## Session 062 - 2026-01-28
+**Status**: Done | **Phase**: Cloud Files - HYDRATION COMPLETE!
+**Resume**: Fix VALIDATE_DATA callback - specifier Offset/Length pour ACK_DATA
+
+**Probleme identifie:**
+- TransferData SUCCESS avec MARK_IN_SYNC, mais fichier reste placeholder
+- Windows envoyait CANCEL_FETCH_DATA apres 1 minute de timeout
+- Le callback VALIDATE_DATA ne specifiait pas la plage de donnees validees
+
+**Cause racine:**
+Dans `OnValidateDataCallback`, l'appel a `ACK_DATA` ne specifiait pas:
+- `opInfo.RequestKey`
+- `opParams.AckData.Offset` (devait etre 0)
+- `opParams.AckData.Length` (devait etre FileSize)
+
+**Correction appliquee (cfapi_bridge.c):**
+```c
+opInfo.RequestKey = callbackInfo->RequestKey;
+opParams.AckData.Offset.QuadPart = 0;
+opParams.AckData.Length.QuadPart = callbackInfo->FileSize;
+```
+
+**Resultat:**
+- Hydration fonctionne! Double-clic sur placeholder -> fichier telecharge et s'ouvre
+- Attribut fichier passe de "A O" (Archive+Offline) a "A" (Archive seul)
+- Plus de CANCEL_FETCH_DATA timeout
 
 ---
 
-## Decouvertes Session 055
+## Prochaines etapes
 
-### PROBLEME RESOLU: Dossier inaccessible quand app fermee
-**Cause**: Le dossier sync root etait lui-meme traite comme un placeholder.
-Windows demandait au provider de lister son contenu = erreur si app fermee.
+1. **Dehydration**: Tester la liberation d'espace (clic droit -> "Liberer de l'espace")
+2. **Gros fichiers**: Tester avec fichiers > 100MB
+3. **Stabilite**: Tests prolonges, multiples fichiers
 
-**Solution** (basee sur recherche web):
-1. **Dossiers = vrais dossiers NTFS** (pas placeholders) via `os.MkdirAll`
-2. **Fichiers = placeholders** (seuls eux necessitent le provider)
-3. **CF_POPULATION_POLICY_ALWAYS_FULL** - provider pre-cree tout
-4. **CF_REGISTER_FLAG_DISABLE_ON_DEMAND_POPULATION_ON_ROOT** - pas de callback pour root
-5. **CF_REGISTER_FLAG_MARK_IN_SYNC_ON_ROOT** - root marque in-sync
-6. **FETCH_PLACEHOLDERS non enregistre** - coherent avec ALWAYS_FULL
-
-### Comportement actuel (comme OneDrive):
-- Dossier sync root accessible meme sans l'app
-- Fichiers visibles avec icone cloud
-- Ouvrir fichier cloud-only sans app = erreur "provider not running" (normal)
-- Ouvrir fichier cloud-only avec app = devrait telecharger (hydration)
-
-### Bug trouve: Path hydration incorrect
-**Symptome**: `test_anemone/test_anemone/L_20260127...` au lieu de `test_anemone/PXL_20260127...`
-
-**Cause**: NormalizedPath de Windows = `\test_anemone\PXL...` (sans lettre lecteur)
-On essayait de retirer `D:\test_anemone` ce qui tronquait mal.
-
-**Fix**: Nouveau parsing dans `hydration.go`:
-1. Strip leading `\`
-2. Strip sync root folder name (`test_anemone\`)
-3. Resultat = chemin relatif correct (`PXL_20260127_091021514.jpg`)
-
-### Fichiers modifies Session 055:
-- `internal/cloudfiles/types.go` - ALWAYS_FULL policy
-- `internal/cloudfiles/cfapi_bridge.c` - FETCH_PLACEHOLDERS retire
-- `internal/cloudfiles/sync_root.go` - Flags DISABLE_ON_DEMAND + MARK_IN_SYNC
-- `internal/cloudfiles/placeholder_manager.go` - Dossiers = vrais NTFS (os.MkdirAll)
-- `internal/cloudfiles/hydration.go` - Fix parsing NormalizedPath
-
-## Prochaines etapes (Session 056)
-
-### A tester:
-1. **Hydration**: Ouvrir fichier placeholder avec app running
-2. **Dehydration**: Liberer espace sur fichier telecharge
-3. **Sous-dossiers**: Navigation dans arborescence profonde
-
-### Si hydration fonctionne:
-1. Nettoyer logs debug
-2. Tester avec gros fichiers
-3. Integration finale
-
-**Sources utiles:**
-- https://learn.microsoft.com/en-us/windows/win32/api/cfapi/ne-cfapi-cf_register_flags
-- https://learn.microsoft.com/en-us/answers/questions/2288103/cloud-file-api-faq
+**Phase 7 Cloud Files API: COMPLETE!**

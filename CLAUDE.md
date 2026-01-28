@@ -154,9 +154,9 @@ internal/
 ### File Structure
 
 - **SESSION_STATE.md** (root) - Overview and session index
-- **.claude/sessions/SESSION_XXX_[name].md** - Detailed session logs
+- **sessions/session_XXX.md** - Detailed session logs
 
-**Naming:** `SESSION_001_project_setup.md`
+**Naming:** `session_001.md`, `session_002.md`, etc.
 
 ### SESSION_STATE.md Header (Required)
 
@@ -338,11 +338,29 @@ govulncheck ./...
 - [ ] All critical/high vulnerabilities addressed
 - [ ] Outdated packages updated or justified
 
-#### 4. Basic Penetration Testing
+#### 4. Online Vulnerability Research
+- [ ] Search CVE databases for stack components
+- [ ] Check GitHub security advisories for dependencies
+- [ ] Review recent security news for frameworks used
+
+**Resources:**
+- https://cve.mitre.org
+- https://nvd.nist.gov
+- https://github.com/advisories
+- https://snyk.io/vuln
+
+#### 5. Basic Penetration Testing
 - [ ] SQL injection attempts on all inputs
 - [ ] Auth bypass attempts (direct URL access, token manipulation)
 - [ ] File path traversal tested
 - [ ] Rate limiting verified (brute force protection)
+
+#### 6. Configuration Security
+- [ ] HTTPS enforced (if applicable)
+- [ ] Security headers present (HSTS, CSP, X-Frame-Options, etc.)
+- [ ] Cookies secured (HttpOnly, Secure, SameSite)
+- [ ] Error pages don't leak stack traces
+- [ ] Admin interfaces protected/hidden
 
 ### Audit Report Template
 
@@ -373,9 +391,22 @@ govulncheck ./...
 [ ] Requires fixes before launch
 ```
 
+### Post-Audit Actions
+
+1. **Critical/High issues** - Fix immediately, re-test
+2. **Medium issues** - Fix before launch or document accepted risk
+3. **Low issues** - Add to backlog
+4. **Re-run audit** after fixes
+
 ---
 
 ## Git Workflow
+
+### Branch Naming
+```
+feature/session-XXX-brief-name
+fix/issue-description
+```
 
 ### Commit Messages
 ```
@@ -429,6 +460,7 @@ export PATH="/c/msys64/mingw64/bin:$PATH" && go build -o testharness.exe ./test/
 | `validate` | Mark current module as validated |
 | `show plan` | Display remaining modules |
 | `security audit` | Run full pre-launch security checklist |
+| `dependency check` | Audit dependencies for vulnerabilities |
 | `build` | Compile with correct GCC |
 
 ---
@@ -439,7 +471,7 @@ export PATH="/c/msys64/mingw64/bin:$PATH" && go build -o testharness.exe ./test/
 - [x] Display sync size in job list (update periodically)
 - [x] First sync wizard / guided setup
 - [x] CLI interface (`--list-jobs`, `--sync <job-id>`, `--sync-all`)
-- [ ] Debug Cloud Files API (ERROR_CLOUD_FILE_NOT_UNDER_SYNC_ROOT)
+- [x] Cloud Files API hydration (Files On Demand - placeholders + hydration a la demande)
 
 ---
 
@@ -451,5 +483,5 @@ export PATH="/c/msys64/mingw64/bin:$PATH" && go build -o testharness.exe ./test/
 
 ---
 
-**Last Updated:** 2026-01-27
-**Version:** 3.1.0
+**Last Updated:** 2026-01-28
+**Version:** 3.2.0
