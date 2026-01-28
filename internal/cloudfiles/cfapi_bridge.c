@@ -691,9 +691,9 @@ int32_t CfapiBridgeConnect(
 
     // NOTE: FETCH_PLACEHOLDERS and CANCEL_FETCH_PLACEHOLDERS are NOT registered
     // because we use CF_POPULATION_POLICY_ALWAYS_FULL which means:
-    // "Provider pre-populates placeholders, Windows should not call FETCH_PLACEHOLDERS"
+    // "Provider pre-populates all placeholders, Windows uses what we've created"
+    // This allows the folder to remain navigable when the provider is not running
     DebugLog("  [SKIP] FETCH_PLACEHOLDERS (using ALWAYS_FULL policy)");
-    DebugLog("  [SKIP] CANCEL_FETCH_PLACEHOLDERS (using ALWAYS_FULL policy)");
 
     // NOTIFY callbacks
     callbacks[idx].Type = CF_CALLBACK_TYPE_NOTIFY_FILE_OPEN_COMPLETION;

@@ -2,9 +2,9 @@
 
 Ce fichier contient un index court de chaque session. Les details sont dans `sessions/session_XXX.md`.
 
-**Derniere session**: 054 (2026-01-27)
-**Phase en cours**: Cloud Files API - Navigation OK, creation fichiers a tester
-**Prochaine session**: 055 - Test creation fichiers + finalisation Cloud Files
+**Derniere session**: 055 (2026-01-28)
+**Phase en cours**: Cloud Files API - Folder accessible offline, hydration a tester
+**Prochaine session**: 056 - Test hydration + finalisation Cloud Files
 
 ---
 
@@ -174,11 +174,11 @@ Ce fichier contient un index court de chaque session. Les details sont dans `ses
 
 ## Session 042 - 2026-01-25
 **Status**: Done | **Phase**: Cleanup + Guidelines
-**Resume**: SESSION_STATE.md 1217→187 lignes, ajout "File Size Guidelines" dans CLAUDE.md
+**Resume**: SESSION_STATE.md 1217->187 lignes, ajout "File Size Guidelines" dans CLAUDE.md
 
 ## Session 043 - 2026-01-25
 **Status**: Done | **Phase**: Refactoring db.go
-**Resume**: db.go 1058→5 fichiers (db.go, db_files.go, db_jobs.go, db_servers.go, db_config.go)
+**Resume**: db.go 1058->5 fichiers (db.go, db_files.go, db_jobs.go, db_servers.go, db_config.go)
 
 ## Session 044 - 2026-01-25
 **Status**: Done | **Phase**: Bugfixes tests
@@ -186,7 +186,7 @@ Ce fichier contient un index court de chaque session. Les details sont dans `ses
 
 ## Session 045 - 2026-01-25
 **Status**: Done | **Phase**: Refactoring engine.go + app.go
-**Resume**: engine.go 1007→4 fichiers, app.go 1512→6 fichiers, tous < 500 lignes
+**Resume**: engine.go 1007->4 fichiers, app.go 1512->6 fichiers, tous < 500 lignes
 
 ## Session 046 - 2026-01-25
 **Status**: Done | **Phase**: Refactoring fichiers > 500 lignes
@@ -194,7 +194,7 @@ Ce fichier contient un index court de chaque session. Les details sont dans `ses
 
 ## Session 047 - 2026-01-25
 **Status**: Done | **Phase**: Refactoring cfapi.go
-**Resume**: cfapi.go 500→4 fichiers (cfapi.go 128, cfapi_syncroot.go 121, cfapi_placeholder.go 115, cfapi_operations.go 175)
+**Resume**: cfapi.go 500->4 fichiers (cfapi.go 128, cfapi_syncroot.go 121, cfapi_placeholder.go 115, cfapi_operations.go 175)
 
 ## Session 048 - 2026-01-27
 **Status**: Done | **Phase**: CLI Interface
@@ -221,114 +221,65 @@ Ce fichier contient un index court de chaque session. Les details sont dans `ses
 **Resume**: Ajout logs debug complets dans bridge C, fix FETCH_PLACEHOLDERS incompatible avec ALWAYS_FULL
 
 ## Session 054 - 2026-01-27
-**Status**: Partial | **Phase**: Debug Cloud Files - Fix navigation
-**Resume**: Fix debounce callback, navigation OK, creation fichiers boucle infinie a resoudre
+**Status**: Done | **Phase**: Debug Cloud Files - Fix navigation
+**Resume**: Fix debounce callback, navigation OK avec app running
+
+## Session 055 - 2026-01-28
+**Status**: Partial | **Phase**: Cloud Files - Folder accessible offline
+**Resume**: Dossier accessible meme sans provider, fix path hydration, hydration a tester
 
 ---
 
-## Bugs connus
+## Decouvertes Session 055
 
-- **Cloud Files API**: Creation fichiers dans sync root - a tester avec config ALWAYS_FULL sans FETCH_PLACEHOLDERS
+### PROBLEME RESOLU: Dossier inaccessible quand app fermee
+**Cause**: Le dossier sync root etait lui-meme traite comme un placeholder.
+Windows demandait au provider de lister son contenu = erreur si app fermee.
 
-## Decouvertes Session 054
+**Solution** (basee sur recherche web):
+1. **Dossiers = vrais dossiers NTFS** (pas placeholders) via `os.MkdirAll`
+2. **Fichiers = placeholders** (seuls eux necessitent le provider)
+3. **CF_POPULATION_POLICY_ALWAYS_FULL** - provider pre-cree tout
+4. **CF_REGISTER_FLAG_DISABLE_ON_DEMAND_POPULATION_ON_ROOT** - pas de callback pour root
+5. **CF_REGISTER_FLAG_MARK_IN_SYNC_ON_ROOT** - root marque in-sync
+6. **FETCH_PLACEHOLDERS non enregistre** - coherent avec ALWAYS_FULL
 
-### PROBLEME RESOLU: Dossier inaccessible
-**Cause**: Le debounce dans `OnFetchPlaceholdersCallback` faisait `return` sans repondre au callback.
-Windows attendait une reponse qui ne venait jamais = freeze.
+### Comportement actuel (comme OneDrive):
+- Dossier sync root accessible meme sans l'app
+- Fichiers visibles avec icone cloud
+- Ouvrir fichier cloud-only sans app = erreur "provider not running" (normal)
+- Ouvrir fichier cloud-only avec app = devrait telecharger (hydration)
 
-**Solution**: Toujours repondre aux callbacks, meme si debounce.
+### Bug trouve: Path hydration incorrect
+**Symptome**: `test_anemone/test_anemone/L_20260127...` au lieu de `test_anemone/PXL_20260127...`
 
-### Ce qui fonctionne maintenant:
-- Navigation dans le dossier sync root (entrer/sortir multiple fois)
-- Callbacks FETCH_PLACEHOLDERS recus et traites correctement
-- Logs debug complets dans cfapi_bridge.c
+**Cause**: NormalizedPath de Windows = `\test_anemone\PXL...` (sans lettre lecteur)
+On essayait de retirer `D:\test_anemone` ce qui tronquait mal.
 
-### Nouveau probleme: Creation fichiers
-- Avec `CF_POPULATION_POLICY_PARTIAL` + `FETCH_PLACEHOLDERS`: boucle infinie de callbacks
-- Windows rappelle FETCH_PLACEHOLDERS en continu quand on cree un fichier
+**Fix**: Nouveau parsing dans `hydration.go`:
+1. Strip leading `\`
+2. Strip sync root folder name (`test_anemone\`)
+3. Resultat = chemin relatif correct (`PXL_20260127_091021514.jpg`)
 
-### Configuration actuelle (a tester):
-- `CF_POPULATION_POLICY_ALWAYS_FULL` (provider gere tout)
-- `FETCH_PLACEHOLDERS` **non enregistre** (coherent avec ALWAYS_FULL)
-- Tous les autres callbacks enregistres (FETCH_DATA, VALIDATE_DATA, NOTIFY_*)
+### Fichiers modifies Session 055:
+- `internal/cloudfiles/types.go` - ALWAYS_FULL policy
+- `internal/cloudfiles/cfapi_bridge.c` - FETCH_PLACEHOLDERS retire
+- `internal/cloudfiles/sync_root.go` - Flags DISABLE_ON_DEMAND + MARK_IN_SYNC
+- `internal/cloudfiles/placeholder_manager.go` - Dossiers = vrais NTFS (os.MkdirAll)
+- `internal/cloudfiles/hydration.go` - Fix parsing NormalizedPath
 
-### Fichiers modifies Session 054:
-- `internal/cloudfiles/cfapi_bridge.c` - Fix debounce, retire FETCH_PLACEHOLDERS
-- `internal/cloudfiles/types.go` - Retour a ALWAYS_FULL
-
-## Decouvertes Session 052
-
-### Ce qui fonctionne maintenant:
-- Placeholders crees avec succes (`HRESULT=0x00000000, processed=1/1`)
-- FileIdentity obligatoire corrige (utilise path comme identity)
-- Policy PLACEHOLDER_MANAGEMENT = UNRESTRICTED
-- Flag CF_REGISTER_FLAG_UPDATE pour forcer mise a jour policies
-- Population placeholders automatique au demarrage
-
-### Ce qui ne fonctionne PAS:
-- Acces au dossier sync root bloque meme avec app en cours d'execution
-- Erreur "Le fournisseur de fichier cloud n'est pas en cours d'execution" quand app fermee
-
-### Decouvertes importantes (recherche web):
-1. **Sample CloudMirror Microsoft n'implemente PAS FETCH_PLACEHOLDERS**
-   - Ils creent les placeholders a l'avance avec CfCreatePlaceholders
-   - Seulement FETCH_DATA et CANCEL_FETCH_DATA sont enregistres
-
-2. **FileIdentity est OBLIGATOIRE pour les fichiers**
-   - Documentation: "FileIdentity is required for files (not for directories)"
-   - On utilisait le path comme identity (comme CloudMirror)
-
-3. **CF_HYDRATION_POLICY_ALWAYS_FULL interdit CfCreatePlaceholders**
-   - Notre code utilise FULL (2) pas ALWAYS_FULL (3) donc OK
-
-4. **CFAPI ne gere PAS la creation de fichiers locaux**
-   - Il faut ReadDirectoryChangesW ou USN Journal pour detecter
-   - Pas de callback automatique pour nouveaux fichiers
-
-## Decouvertes Session 053
-
-### Comportement observe:
-- **Dossier accessible UNE SEULE FOIS** apres lancement app
-- Si on sort et re-entre, dossier bloque (meme avec app en cours)
-- Apres redemarrage app: fonctionne encore une fois puis bloque
-
-### Probleme identifie:
-- FETCH_PLACEHOLDERS etait enregistre mais on utilise CF_POPULATION_POLICY_ALWAYS_FULL
-- C'est **INCOMPATIBLE**: ALWAYS_FULL = provider gere tout, pas de callback FETCH_PLACEHOLDERS
-- Quand on repondait avec DISABLE_ON_DEMAND_POPULATION, Windows desactivait les callbacks
-
-### Corrections Session 053:
-1. **FETCH_PLACEHOLDERS retire** des callbacks enregistres (incompatible avec ALWAYS_FULL)
-2. **Erreur ALREADY_EXISTS ignoree** (0x800700B7 = fichier existe deja, pas une erreur)
-3. **Logs debug complets** ajoutes dans cfapi_bridge.c avec timestamp
-
-### Fichiers modifies Session 053:
-- `internal/cloudfiles/cfapi_bridge.c` - Logs detailles + FETCH_PLACEHOLDERS retire
-- `internal/cloudfiles/cfapi_placeholder.go` - Ignore erreur ALREADY_EXISTS
-
-## Prochaines etapes (Session 055)
+## Prochaines etapes (Session 056)
 
 ### A tester:
-1. **Navigation**: devrait fonctionner (entrer/sortir du dossier)
-2. **Creation fichiers**: avec ALWAYS_FULL + sans FETCH_PLACEHOLDERS
-3. **Hydration**: ouvrir un fichier placeholder (download depuis serveur)
+1. **Hydration**: Ouvrir fichier placeholder avec app running
+2. **Dehydration**: Liberer espace sur fichier telecharge
+3. **Sous-dossiers**: Navigation dans arborescence profonde
 
-### Si creation fichiers ne fonctionne pas:
-1. Verifier les logs - quel callback bloque?
-2. Essayer de desactiver certains NOTIFY_* callbacks
-3. Comparer avec CloudMirror qui utilise seulement FETCH_DATA + CANCEL_FETCH_DATA
-
-### Si ca fonctionne:
-1. Nettoyer les callbacks inutiles (garder minimum necessaire)
-2. Tester hydration complete (download fichier)
-3. Tester dehydration (liberer espace)
-4. Integration finale avec sync engine
-
-**Alternative si Cloud Files reste instable:**
-- Garder sync traditionnelle comme fonctionnalite principale
-- Cloud Files en option "beta" ou desactivee par defaut
+### Si hydration fonctionne:
+1. Nettoyer logs debug
+2. Tester avec gros fichiers
+3. Integration finale
 
 **Sources utiles:**
-- https://github.com/microsoft/Windows-classic-samples/tree/main/Samples/CloudMirror
+- https://learn.microsoft.com/en-us/windows/win32/api/cfapi/ne-cfapi-cf_register_flags
 - https://learn.microsoft.com/en-us/answers/questions/2288103/cloud-file-api-faq
-- https://learn.microsoft.com/en-us/windows/win32/api/cfapi/ns-cfapi-cf_placeholder_create_info

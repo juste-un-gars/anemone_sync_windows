@@ -202,9 +202,12 @@ type PlaceholderFileState struct {
 	ModTime       time.Time
 }
 
-// ensureDirectoryPlaceholder creates a directory placeholder if it doesn't exist.
-// Directory placeholders must be created via CfCreatePlaceholders for file placeholders
-// to work correctly inside them.
+// ensureDirectoryPlaceholder creates a REAL NTFS directory (not a placeholder).
+// This is critical: directories must be real NTFS directories so they remain
+// accessible even when the sync provider is not running.
+// Only FILES should be placeholders - directories are always real.
+// This matches OneDrive's behavior: you can always navigate folders,
+// but cloud-only files need the provider to hydrate.
 func (pm *PlaceholderManager) ensureDirectoryPlaceholder(relativePath string) error {
 	// Convert forward slashes to backslashes for Windows API
 	relativePathWin := strings.ReplaceAll(relativePath, "/", "\\")
@@ -215,46 +218,10 @@ func (pm *PlaceholderManager) ensureDirectoryPlaceholder(relativePath string) er
 		return nil // Already exists
 	}
 
-	// Get parent directory path and directory name
-	parentPath := filepath.Dir(fullPath)
-	dirName := filepath.Base(fullPath)
-
-	// Ensure parent exists (recursively create parent placeholders if needed)
-	if parentPath != pm.syncRoot.Path() {
-		parentRelative := strings.TrimPrefix(parentPath, pm.syncRoot.Path())
-		parentRelative = strings.TrimPrefix(parentRelative, "\\")
-		if parentRelative != "" {
-			if err := pm.ensureDirectoryPlaceholder(parentRelative); err != nil {
-				return err
-			}
-		}
-	}
-
-	// Create directory placeholder using CfCreatePlaceholders
-	dirNamePtr, err := windows.UTF16PtrFromString(dirName)
-	if err != nil {
-		return fmt.Errorf("invalid directory name %s: %w", dirName, err)
-	}
-
-	placeholder := CF_PLACEHOLDER_CREATE_INFO{
-		RelativeFileName: dirNamePtr,
-		FsMetadata: CF_FS_METADATA{
-			FileSize: 0,
-			BasicInfo: FILE_BASIC_INFO{
-				FileAttributes: windows.FILE_ATTRIBUTE_DIRECTORY,
-			},
-		},
-		Flags: CF_PLACEHOLDER_CREATE_FLAG_MARK_IN_SYNC,
-	}
-
-	// Create the directory placeholder in the parent
-	placeholders := []CF_PLACEHOLDER_CREATE_INFO{placeholder}
-	if err := CreatePlaceholders(parentPath, placeholders); err != nil {
-		// If it fails, fall back to creating a normal directory
-		// This handles the case where the parent is the sync root itself
-		if mkErr := os.Mkdir(fullPath, 0755); mkErr != nil && !os.IsExist(mkErr) {
-			return fmt.Errorf("failed to create directory placeholder: %w (mkdir also failed: %v)", err, mkErr)
-		}
+	// Create the directory and all parent directories using standard NTFS mkdir
+	// This ensures directories are ALWAYS accessible, even without the provider
+	if err := os.MkdirAll(fullPath, 0755); err != nil {
+		return fmt.Errorf("failed to create directory %s: %w", relativePath, err)
 	}
 
 	return nil
@@ -276,6 +243,9 @@ func (pm *PlaceholderManager) createFilePlaceholders(parentDir string, files []R
 	// Convert to CF_PLACEHOLDER_CREATE_INFO
 	placeholders := make([]CF_PLACEHOLDER_CREATE_INFO, len(files))
 
+	// Keep file identity strings alive during the API call
+	fileIdentities := make([][]uint16, len(files))
+
 	for i, f := range files {
 		// Get just the filename for the placeholder
 		fileName := filepath.Base(f.Path)
@@ -284,8 +254,26 @@ func (pm *PlaceholderManager) createFilePlaceholders(parentDir string, files []R
 			return fmt.Errorf("invalid filename %s: %w", fileName, err)
 		}
 
+		// FileIdentity is REQUIRED for files - use the relative path as identity
+		// (this is what CloudMirror sample does)
+		var fileIdentityPtr unsafe.Pointer
+		var fileIdentityLen uint32
+
+		if len(f.FileIdentity) > 0 {
+			// Use provided identity
+			fileIdentityPtr = unsafe.Pointer(&f.FileIdentity[0])
+			fileIdentityLen = uint32(len(f.FileIdentity))
+		} else {
+			// Use relative path as identity (include null terminator)
+			fileIdentities[i], _ = windows.UTF16FromString(f.Path)
+			fileIdentityPtr = unsafe.Pointer(&fileIdentities[i][0])
+			fileIdentityLen = uint32(len(fileIdentities[i]) * 2) // Size in bytes
+		}
+
 		placeholders[i] = CF_PLACEHOLDER_CREATE_INFO{
-			RelativeFileName: fileNamePtr,
+			RelativeFileName:   fileNamePtr,
+			FileIdentity:       fileIdentityPtr,
+			FileIdentityLength: fileIdentityLen,
 			FsMetadata: CF_FS_METADATA{
 				FileSize: f.Size,
 				BasicInfo: FILE_BASIC_INFO{
@@ -297,12 +285,6 @@ func (pm *PlaceholderManager) createFilePlaceholders(parentDir string, files []R
 				},
 			},
 			Flags: CF_PLACEHOLDER_CREATE_FLAG_MARK_IN_SYNC,
-		}
-
-		// Set file identity if provided
-		if len(f.FileIdentity) > 0 {
-			placeholders[i].FileIdentity = unsafe.Pointer(&f.FileIdentity[0])
-			placeholders[i].FileIdentityLength = uint32(len(f.FileIdentity))
 		}
 	}
 

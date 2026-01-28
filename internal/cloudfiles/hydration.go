@@ -8,6 +8,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path/filepath"
+	"strings"
 	"sync"
 
 	"go.uber.org/zap"
@@ -73,11 +75,25 @@ func (h *HydrationHandler) HandleFetchData(ctx context.Context, info *FetchDataI
 	// Create cancellable context
 	ctx, cancel := context.WithCancel(ctx)
 
-	// Get relative path from full path
+	// Get relative path from NormalizedPath
+	// NormalizedPath format: \<sync_root_folder>\<relative_path>
+	// e.g., \test_anemone\subdir\file.txt -> subdir/file.txt
 	relativePath := info.FilePath
-	if len(h.syncRoot.Path()) < len(relativePath) {
-		relativePath = relativePath[len(h.syncRoot.Path())+1:]
+
+	// Strip leading backslash
+	relativePath = strings.TrimPrefix(relativePath, "\\")
+	relativePath = strings.TrimPrefix(relativePath, "/")
+
+	// Strip sync root folder name from the beginning
+	syncRootFolderName := filepath.Base(h.syncRoot.Path())
+	if strings.HasPrefix(relativePath, syncRootFolderName+"\\") {
+		relativePath = relativePath[len(syncRootFolderName)+1:]
+	} else if strings.HasPrefix(relativePath, syncRootFolderName+"/") {
+		relativePath = relativePath[len(syncRootFolderName)+1:]
 	}
+
+	// Normalize to forward slashes
+	relativePath = strings.ReplaceAll(relativePath, "\\", "/")
 
 	// Track this hydration
 	hydration := &activeHydration{

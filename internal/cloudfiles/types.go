@@ -148,8 +148,10 @@ func NewDefaultSyncPolicies() *CF_SYNC_POLICIES {
 			Modifier: CF_HYDRATION_POLICY_MODIFIER_AUTO_DEHYDRATION_ALLOWED,
 		},
 		Population: CF_POPULATION_POLICY{
-			// Use ALWAYS_FULL - provider pre-populates placeholders, no FETCH_PLACEHOLDERS callback needed
-			// With this policy, we should NOT register FETCH_PLACEHOLDERS callback
+			// Use ALWAYS_FULL - provider pre-populates all placeholders at startup
+			// Windows uses what we've created, no FETCH_PLACEHOLDERS callback needed
+			// This allows the folder to remain accessible when provider is not running
+			// (only cloud-only files will show error, but folder navigation works)
 			Primary:  CF_POPULATION_POLICY_ALWAYS_FULL,
 			Modifier: CF_POPULATION_POLICY_MODIFIER_NONE,
 		},

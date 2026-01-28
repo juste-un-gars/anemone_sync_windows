@@ -152,8 +152,14 @@ func (m *SyncRootManager) Register() error {
 	// Create policies (Files On Demand style)
 	policies := NewDefaultSyncPolicies()
 
-	// Register the sync root
-	flags := CF_REGISTER_FLAG_NONE
+	// Register the sync root with these flags:
+	// - UPDATE: apply new policies if already registered
+	// - DISABLE_ON_DEMAND_POPULATION_ON_ROOT: don't call FETCH_PLACEHOLDERS for root
+	// - MARK_IN_SYNC_ON_ROOT: mark the root as in-sync
+	// This allows folder navigation to work even when provider is not running
+	flags := CF_REGISTER_FLAG_UPDATE |
+		CF_REGISTER_FLAG_DISABLE_ON_DEMAND_POPULATION_ON_ROOT |
+		CF_REGISTER_FLAG_MARK_IN_SYNC_ON_ROOT
 	if err := RegisterSyncRoot(m.path, registration, policies, flags); err != nil {
 		// Check if already registered (not an error)
 		if isAlreadyExistsError(err) {
