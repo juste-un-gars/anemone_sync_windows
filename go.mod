@@ -4,21 +4,22 @@ go 1.24.0
 
 require (
 	fyne.io/fyne/v2 v2.7.2
-	fyne.io/systray v1.12.0
+	github.com/fsnotify/fsnotify v1.9.0
 	github.com/hirochachacha/go-smb2 v1.1.0
 	github.com/mutecomm/go-sqlcipher/v4 v4.4.2
 	github.com/spf13/viper v1.18.2
 	github.com/zalando/go-keyring v0.2.6
-	go.uber.org/zap v1.26.0
+	go.uber.org/zap v1.27.1
+	golang.org/x/sys v0.40.0
 )
 
 require (
 	al.essio.dev/pkg/shellescape v1.5.1 // indirect
+	fyne.io/systray v1.12.0 // indirect
 	github.com/BurntSushi/toml v1.5.0 // indirect
 	github.com/danieljoos/wincred v1.2.2 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/fredbi/uri v1.1.1 // indirect
-	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/fyne-io/gl-js v0.2.0 // indirect
 	github.com/fyne-io/glfw-js v0.3.0 // indirect
 	github.com/fyne-io/image v0.1.1 // indirect
@@ -57,8 +58,6 @@ require (
 	golang.org/x/exp v0.0.0-20230905200255-921286631fa9 // indirect
 	golang.org/x/image v0.24.0 // indirect
 	golang.org/x/net v0.35.0 // indirect
-	golang.org/x/sys v0.40.0 // indirect
-	golang.org/x/term v0.39.0 // indirect
 	golang.org/x/text v0.22.0 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
