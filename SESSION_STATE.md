@@ -2,9 +2,9 @@
 
 Ce fichier contient un index court de chaque session. Les details sont dans `sessions/session_XXX.md`.
 
-**Derniere session**: 063 (2026-01-29)
-**Phase en cours**: Dehydration - Debug CfSetInSyncState
-**Prochaine etape**: Essayer CfUpdatePlaceholder avec CF_UPDATE_FLAG_MARK_IN_SYNC
+**Derniere session**: 064 (2026-01-29)
+**Phase en cours**: Cloud Files API Complete
+**Prochaine etape**: CLI dehydrate, tests gros fichiers
 
 ---
 
@@ -280,59 +280,45 @@ opParams.AckData.Length.QuadPart = callbackInfo->FileSize;
 - Plus de CANCEL_FETCH_DATA timeout
 
 ## Session 063 - 2026-01-29
-**Status**: In Progress | **Phase**: Dehydration - Debug CfSetInSyncState
-**Resume**: CfSetInSyncState retourne SUCCESS mais ne change pas le state - API problematique
+**Status**: Done | **Phase**: Dehydration UI
+**Resume**: Menu Free Up Space, dialog fichiers hydrates, scanner
 
-**Travail effectue (partie 1):**
-- Menu systray "Free Up Space" avec sous-menu par job Files On Demand
-- Dialog Fyne: liste fichiers hydrates, slider filtre "non utilises depuis X jours"
-- Scanner fichiers hydrates avec tri par date dernier acces
-- `SyncManager.GetProvider()` pour acceder au CloudFilesProvider
-- `CloudFilesProvider.GetDehydrationManager()` pour acceder au DehydrationManager
+## Session 064 - 2026-01-29
+**Status**: Done | **Phase**: Dehydration Complete
+**Resume**: Fix dehydration via CfUpdatePlaceholder avec DEHYDRATE|MARK_IN_SYNC
 
-**Travail effectue (partie 2) - Debug approfondi:**
-- Ajout logs verbeux dans `CfSetInSyncState` (HRESULT + lastErr)
-- Ajout logs state BEFORE/AFTER dans `hydration.go`
-- Recherche documentation Microsoft et forums
+**Probleme initial:**
+- `CfSetInSyncState` et `CfDehydratePlaceholder` retournaient SUCCESS mais ne changeaient pas le state
+- Le fichier restait state=0x21 (PLACEHOLDER+SYNC_ROOT) sans PARTIAL ni IN_SYNC
 
-**Decouvertes importantes:**
-1. **`CF_OPERATION_TRANSFER_DATA_FLAG_MARK_IN_SYNC` N'EXISTE PAS!**
-   - Le header Windows SDK `cfapi.h` ne contient que `CF_OPERATION_TRANSFER_DATA_FLAG_NONE = 0x0`
-   - Notre flag 0x1 sur TransferData est ignore par Windows
+**Solution trouvee:**
+Utiliser `CfUpdatePlaceholder` avec les flags combines:
+```go
+CF_UPDATE_FLAG_DEHYDRATE | CF_UPDATE_FLAG_MARK_IN_SYNC  // 0x6
+```
 
-2. **`CfSetInSyncState` retourne SUCCESS mais NE FAIT RIEN:**
-   ```
-   BEFORE: state=0x00000021, IN_SYNC=false
-   CfSetInSyncState HRESULT=0x00000000 (SUCCESS)
-   AFTER:  state=0x00000021, IN_SYNC=false  <-- INCHANGE!
-   ```
+**Resultat:**
+```
+Before: state=0x00000021 (PLACEHOLDER + SYNC_ROOT)
+After:  state=0x00000031 (PLACEHOLDER + PARTIAL + SYNC_ROOT)
+```
+- Le flag PARTIAL (0x10) indique fichier deshydrate
+- L'espace disque est reellement libere ("Taille sur le disque" = 0)
+- Attributs Explorer: ALOM (placeholder) <-> AL (hydrate) <-> ALOM (deshydrate)
 
-3. **`CfDehydratePlaceholder` meme probleme:**
-   - Retourne SUCCESS
-   - Attributs changent (ajout OFFLINE 0x200)
-   - Mais state reste 0x21 (pas de PARTIAL 0x10)
+**Fichiers modifies:**
+- `internal/cloudfiles/cfapi_operations.go` - Ajout UpdatePlaceholder() avec tous les CF_UPDATE_FLAG_*
+- `internal/cloudfiles/hydration.go` - Utilise UpdatePlaceholder pour marquer IN_SYNC apres hydration
+- `internal/cloudfiles/dehydration_scan.go` - Utilise UpdatePlaceholder(DEHYDRATE|MARK_IN_SYNC)
 
-**Hypotheses a explorer:**
-1. Le handle `CfOpenFileWithOplock` n'est pas compatible avec `CfSetInSyncState`
-   - Essayer un handle `CreateFile` standard
-2. Utiliser `CfUpdatePlaceholder` avec `CF_UPDATE_FLAG_MARK_IN_SYNC` (0x02) au lieu de `CfSetInSyncState`
-3. Le placeholder perd sa validite apres hydration complete?
-
-**Fichiers modifies cette session:**
-- `internal/cloudfiles/cfapi_operations.go` - Logs verbeux CfSetInSyncState
-- `internal/cloudfiles/hydration.go` - Logs state BEFORE/AFTER, CfOpenFileWithOplock
-
-**Sources consultees:**
-- https://learn.microsoft.com/en-us/windows/win32/api/cfapi/ne-cfapi-cf_operation_transfer_data_flags
-- https://github.com/tpn/winsdk-10/blob/master/Include/10.0.16299.0/um/cfapi.h
+**Sources cles:**
+- https://learn.microsoft.com/en-us/windows/win32/api/cfapi/nf-cfapi-cfupdateplaceholder
 - https://learn.microsoft.com/en-us/answers/questions/2288103/cloud-file-api-faq
-- https://github.com/Microsoft/Windows-classic-samples/tree/main/Samples/CloudMirror
 
 ---
 
 ## Prochaines etapes
 
-1. **Essayer `CfUpdatePlaceholder`** avec `CF_UPDATE_FLAG_MARK_IN_SYNC` au lieu de `CfSetInSyncState`
-2. **Essayer handle CreateFile standard** au lieu de `CfOpenFileWithOplock` pour CfSetInSyncState
-3. **CLI**: `anemonesync --dehydrate <job-id> [--days 30]`
-4. **Gros fichiers**: Tester avec fichiers > 100MB
+1. **CLI**: `anemonesync --dehydrate <job-id> [--days 30]`
+2. **Gros fichiers**: Tester avec fichiers > 100MB
+3. **Cleanup**: Supprimer les logs DEBUG excessifs

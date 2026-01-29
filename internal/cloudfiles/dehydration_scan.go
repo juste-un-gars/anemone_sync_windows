@@ -196,10 +196,14 @@ func (dm *DehydrationManager) DehydrateFile(ctx context.Context, relativePath st
 		return nil // Already dehydrated
 	}
 
-	// Dehydrate the file using the PROTECTED handle (not Win32 handle!)
-	// CfDehydratePlaceholder requires the protected handle from CfOpenFileWithOplock
-	if err := DehydratePlaceholder(protectedHandle, 0, fileSize, 0); err != nil {
-		return fmt.Errorf("failed to dehydrate: %w", err)
+	// Use CfUpdatePlaceholder with DEHYDRATE + MARK_IN_SYNC flags
+	// This is the recommended approach per Microsoft docs:
+	// - MARK_IN_SYNC ensures the file is marked as synchronized
+	// - DEHYDRATE removes the local content in one atomic operation
+	// Using the protected handle from CfOpenFileWithOplock (exclusive access required)
+	fmt.Printf("[DEBUG Dehydrate] Calling CfUpdatePlaceholder with DEHYDRATE|MARK_IN_SYNC flags\n")
+	if err := UpdatePlaceholder(protectedHandle, CF_UPDATE_FLAG_DEHYDRATE|CF_UPDATE_FLAG_MARK_IN_SYNC); err != nil {
+		return fmt.Errorf("failed to dehydrate via CfUpdatePlaceholder: %w", err)
 	}
 
 	// Check state after dehydration

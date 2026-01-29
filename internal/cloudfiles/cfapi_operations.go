@@ -299,3 +299,63 @@ func ReleaseProtectedHandle(protectedHandle windows.Handle) {
 	}
 	procCfReleaseProtectedHandle.Call(uintptr(protectedHandle))
 }
+
+// CF_UPDATE_FLAGS for CfUpdatePlaceholder
+type CF_UPDATE_FLAGS uint32
+
+const (
+	CF_UPDATE_FLAG_NONE                        CF_UPDATE_FLAGS = 0x00000000
+	CF_UPDATE_FLAG_VERIFY_IN_SYNC              CF_UPDATE_FLAGS = 0x00000001
+	CF_UPDATE_FLAG_MARK_IN_SYNC                CF_UPDATE_FLAGS = 0x00000002 // Mark as in-sync after update
+	CF_UPDATE_FLAG_DEHYDRATE                   CF_UPDATE_FLAGS = 0x00000004
+	CF_UPDATE_FLAG_ENABLE_ON_DEMAND_POPULATION CF_UPDATE_FLAGS = 0x00000008
+	CF_UPDATE_FLAG_DISABLE_ON_DEMAND_POPULATION CF_UPDATE_FLAGS = 0x00000010
+	CF_UPDATE_FLAG_REMOVE_FILE_IDENTITY        CF_UPDATE_FLAGS = 0x00000020
+	CF_UPDATE_FLAG_CLEAR_IN_SYNC               CF_UPDATE_FLAGS = 0x00000040
+	CF_UPDATE_FLAG_REMOVE_PROPERTY             CF_UPDATE_FLAGS = 0x00000080
+	CF_UPDATE_FLAG_PASSTHROUGH_FS_METADATA     CF_UPDATE_FLAGS = 0x00000100
+	CF_UPDATE_FLAG_ALWAYS_FULL                 CF_UPDATE_FLAGS = 0x00000200
+	CF_UPDATE_FLAG_ALLOW_PARTIAL               CF_UPDATE_FLAGS = 0x00000400
+)
+
+// UpdatePlaceholder updates a placeholder file with optional metadata and flags.
+// Use CF_UPDATE_FLAG_MARK_IN_SYNC to mark the file as in-sync after hydration.
+func UpdatePlaceholder(fileHandle windows.Handle, flags CF_UPDATE_FLAGS) error {
+	if err := procCfUpdatePlaceholder.Find(); err != nil {
+		return fmt.Errorf("CfUpdatePlaceholder not available: %w", err)
+	}
+
+	fmt.Printf("[DEBUG CfUpdatePlaceholder] handle=%v, flags=0x%X\n", fileHandle, flags)
+
+	// CfUpdatePlaceholder signature:
+	// HRESULT CfUpdatePlaceholder(
+	//   HANDLE FileHandle,
+	//   const CF_FS_METADATA *FsMetadata,        // NULL = no change
+	//   LPCVOID FileIdentity,                    // NULL = no change
+	//   DWORD FileIdentityLength,
+	//   const CF_FILE_RANGE *DehydrateRangeArray, // NULL = no dehydrate ranges
+	//   DWORD DehydrateRangeCount,
+	//   CF_UPDATE_FLAGS UpdateFlags,
+	//   USN *UpdateUsn,                          // NULL = don't return USN
+	//   LPOVERLAPPED Overlapped                  // NULL = synchronous
+	// )
+	hr, _, lastErr := procCfUpdatePlaceholder.Call(
+		uintptr(fileHandle),
+		0, // FsMetadata - NULL
+		0, // FileIdentity - NULL
+		0, // FileIdentityLength
+		0, // DehydrateRangeArray - NULL
+		0, // DehydrateRangeCount
+		uintptr(flags),
+		0, // UpdateUsn - NULL
+		0, // Overlapped - NULL (synchronous)
+	)
+
+	fmt.Printf("[DEBUG CfUpdatePlaceholder] HRESULT=0x%08X, lastErr=%v\n", hr, lastErr)
+
+	if hr != S_OK {
+		return fmt.Errorf("CfUpdatePlaceholder failed: HRESULT 0x%08X (%s)", hr, decodeHRESULT(uint32(hr)))
+	}
+
+	return nil
+}
