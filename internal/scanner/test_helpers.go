@@ -281,3 +281,28 @@ func (h *TestHelpers) Cleanup() {
 		os.RemoveAll(h.tempDir)
 	}
 }
+
+// SimulateSyncComplete simulates a successful sync by updating files_state with last_sync
+// This is needed because the scanner no longer updates files_state during scan,
+// only after a successful sync. This helper allows tests to simulate that behavior.
+func (h *TestHelpers) SimulateSyncComplete(db *database.DB, jobID int64, files []*FileInfo) {
+	h.t.Helper()
+
+	now := time.Now().Unix()
+	for _, f := range files {
+		_, err := db.Conn().Exec(`
+			INSERT INTO files_state (job_id, local_path, remote_path, size, mtime, hash, last_sync, sync_status, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(job_id, local_path) DO UPDATE SET
+				size = excluded.size,
+				mtime = excluded.mtime,
+				hash = excluded.hash,
+				last_sync = excluded.last_sync,
+				sync_status = excluded.sync_status,
+				updated_at = excluded.updated_at
+		`, jobID, f.LocalPath, f.RemotePath, f.Size, f.MTime.Unix(), f.Hash, now, "idle", now, now)
+		if err != nil {
+			h.t.Fatalf("failed to simulate sync for %s: %v", f.LocalPath, err)
+		}
+	}
+}

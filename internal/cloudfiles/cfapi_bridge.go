@@ -13,14 +13,199 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"io"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"unsafe"
 
 	"go.uber.org/zap"
 )
+
+// ============================================================================
+// Global data provider for CGO callbacks
+// ============================================================================
+// Since CGO exported functions can't have context/receivers, we use a global.
+// This is set when the provider is initialized.
+
+var (
+	globalDataProviderMu     sync.RWMutex
+	globalDataProvider       DataProvider
+	globalSyncRootPath       string
+	globalHydrationLogger    *zap.Logger
+	globalProgressCallback   func(path string, total, completed int64)
+)
+
+// SetGlobalDataProvider sets the global data provider for CGO callbacks.
+// This must be called before any hydration can occur.
+func SetGlobalDataProvider(provider DataProvider, syncRootPath string, logger *zap.Logger) {
+	globalDataProviderMu.Lock()
+	defer globalDataProviderMu.Unlock()
+	globalDataProvider = provider
+	globalSyncRootPath = syncRootPath
+	if logger != nil {
+		globalHydrationLogger = logger
+	} else {
+		globalHydrationLogger = zap.NewNop()
+	}
+}
+
+// SetGlobalProgressCallback sets a callback for hydration progress updates.
+func SetGlobalProgressCallback(cb func(path string, total, completed int64)) {
+	globalDataProviderMu.Lock()
+	defer globalDataProviderMu.Unlock()
+	globalProgressCallback = cb
+}
+
+// ClearGlobalDataProvider clears the global data provider.
+func ClearGlobalDataProvider() {
+	globalDataProviderMu.Lock()
+	defer globalDataProviderMu.Unlock()
+	globalDataProvider = nil
+	globalSyncRootPath = ""
+	globalProgressCallback = nil
+}
+
+// ============================================================================
+// Shared Fetch Handler
+// ============================================================================
+// Processes fetch requests from C via shared memory.
+// C signals requestReadyEvent, Go reads the request, fetches data, fills buffer,
+// then signals dataReadyEvent. This avoids calling Go from the callback thread.
+
+// handleSharedFetchRequest processes a pending fetch request from C.
+// Called by processLoop when requestReadyEvent is signaled.
+func handleSharedFetchRequest(logger *zap.Logger) {
+	// Get pointer to shared request structure
+	sharedReq := C.CfapiBridgeGetPendingRequest()
+	if sharedReq == nil {
+		logger.Error("handleSharedFetchRequest: shared request is nil")
+		return
+	}
+
+	// Read request parameters
+	filePath := wcharToString((*uint16)(unsafe.Pointer(&sharedReq.filePath[0])))
+	offset := int64(sharedReq.offset)
+	maxLength := int64(sharedReq.maxLength)
+
+	globalDataProviderMu.RLock()
+	provider := globalDataProvider
+	syncRootPath := globalSyncRootPath
+	globalDataProviderMu.RUnlock()
+
+	if provider == nil {
+		logger.Error("handleSharedFetchRequest: no data provider set")
+		sharedReq.errorCode = -1
+		sharedReq.dataLength = 0
+		C.CfapiBridgeSignalDataReady()
+		return
+	}
+
+	// Convert NormalizedPath to relative path
+	relativePath := filePath
+	relativePath = strings.TrimPrefix(relativePath, "\\")
+	relativePath = strings.TrimPrefix(relativePath, "/")
+
+	// Strip sync root folder name
+	syncRootFolderName := filepath.Base(syncRootPath)
+	if strings.HasPrefix(relativePath, syncRootFolderName+"\\") {
+		relativePath = relativePath[len(syncRootFolderName)+1:]
+	} else if strings.HasPrefix(relativePath, syncRootFolderName+"/") {
+		relativePath = relativePath[len(syncRootFolderName)+1:]
+	}
+
+	// Normalize to forward slashes
+	relativePath = strings.ReplaceAll(relativePath, "\\", "/")
+
+	logger.Debug("handleSharedFetchRequest",
+		zap.String("normalized_path", filePath),
+		zap.String("relative_path", relativePath),
+		zap.Int64("offset", offset),
+		zap.Int64("max_length", maxLength),
+	)
+
+	// Get reader from data provider
+	ctx := context.Background()
+	reader, err := provider.GetFileReader(ctx, relativePath, offset)
+	if err != nil {
+		logger.Error("handleSharedFetchRequest: failed to get file reader",
+			zap.String("path", relativePath),
+			zap.Error(err),
+		)
+		sharedReq.errorCode = -2
+		sharedReq.dataLength = 0
+		C.CfapiBridgeSignalDataReady()
+		return
+	}
+	defer reader.Close()
+
+	// Read data into shared buffer
+	bufferPtr := (*[C.CFAPI_BRIDGE_MAX_CHUNK_SIZE]byte)(unsafe.Pointer(&sharedReq.data[0]))
+	toRead := maxLength
+	if toRead > C.CFAPI_BRIDGE_MAX_CHUNK_SIZE {
+		toRead = C.CFAPI_BRIDGE_MAX_CHUNK_SIZE
+	}
+
+	n, err := io.ReadFull(reader, bufferPtr[:toRead])
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		logger.Error("handleSharedFetchRequest: failed to read data",
+			zap.String("path", relativePath),
+			zap.Error(err),
+		)
+		sharedReq.errorCode = -3
+		sharedReq.dataLength = 0
+		C.CfapiBridgeSignalDataReady()
+		return
+	}
+
+	sharedReq.errorCode = 0
+	sharedReq.dataLength = C.int64_t(n)
+
+	logger.Debug("handleSharedFetchRequest: read complete",
+		zap.String("path", relativePath),
+		zap.Int("bytes_read", n),
+	)
+
+	// Signal that data is ready for C to read
+	C.CfapiBridgeSignalDataReady()
+}
+
+// GetRequestReadyEvent returns the event handle for the request ready event.
+// Used by processLoop to wait for fetch requests.
+func GetRequestReadyEvent() uintptr {
+	sharedReq := C.CfapiBridgeGetPendingRequest()
+	if sharedReq == nil {
+		return 0
+	}
+	return uintptr(sharedReq.requestReadyEvent)
+}
+
+// ============================================================================
+// CGO Exported Functions (kept for backwards compatibility)
+// ============================================================================
+
+//export GoFetchDataChunk
+func GoFetchDataChunk(normalizedPath *C.wchar_t, offset C.int64_t, maxLength C.int64_t, response *C.CfapiBridgeFetchResponse) C.int32_t {
+	// This function is no longer called directly by C callbacks.
+	// Kept for API compatibility. The new architecture uses shared memory.
+	response.errorCode = -99 // Should not be called
+	return -99
+}
+
+//export GoReportHydrationProgress
+func GoReportHydrationProgress(normalizedPath *C.wchar_t, total C.int64_t, completed C.int64_t) {
+	filePath := wcharToString((*uint16)(unsafe.Pointer(normalizedPath)))
+
+	globalDataProviderMu.RLock()
+	cb := globalProgressCallback
+	globalDataProviderMu.RUnlock()
+
+	if cb != nil {
+		cb(filePath, int64(total), int64(completed))
+	}
+}
 
 // BridgeManager manages the CGO bridge for Cloud Files callbacks.
 // It processes callbacks from a dedicated OS thread to avoid Go scheduler issues.
@@ -64,12 +249,14 @@ type BridgeHandlers struct {
 
 // BridgeFetchDataRequest contains information about a hydration request.
 type BridgeFetchDataRequest struct {
-	ConnectionKey  int64
-	TransferKey    int64
-	FilePath       string // Full normalized path
-	FileSize       int64
-	RequiredOffset int64
-	RequiredLength int64
+	ConnectionKey   int64
+	TransferKey     int64
+	RequestKey      int64  // Required for CfExecute in async operations
+	FilePath        string // Full normalized path
+	FileSize        int64
+	RequiredOffset  int64
+	RequiredLength  int64
+	CompletionEvent uintptr // Event handle to signal when transfer is complete
 }
 
 // BridgeConfig contains configuration for the bridge manager.
@@ -269,6 +456,9 @@ func (b *BridgeManager) GetQueueCount() int {
 
 // processLoop is the main worker loop that processes callbacks.
 // It runs on a dedicated OS thread to avoid Go scheduler issues.
+// It handles BOTH:
+// 1. Shared fetch requests (C signals requestReadyEvent, Go fills buffer)
+// 2. Queue-based requests (CANCEL_FETCH_DATA, NOTIFY_DELETE, NOTIFY_RENAME)
 func (b *BridgeManager) processLoop(ctx context.Context) {
 	// Lock this goroutine to a specific OS thread
 	runtime.LockOSThread()
@@ -277,6 +467,10 @@ func (b *BridgeManager) processLoop(ctx context.Context) {
 	defer close(b.doneChan)
 
 	b.logger.Debug("bridge process loop started on dedicated OS thread")
+
+	// Get the request ready event handle for shared fetch
+	requestReadyEvent := GetRequestReadyEvent()
+	b.logger.Debug("request ready event handle", zap.Uint64("handle", uint64(requestReadyEvent)))
 
 	for {
 		select {
@@ -289,10 +483,24 @@ func (b *BridgeManager) processLoop(ctx context.Context) {
 		default:
 		}
 
-		// Wait for a request with timeout (allows checking stop channel)
-		result := C.CfapiBridgeWaitForRequest(100) // 100ms timeout
+		// Check for shared fetch request first (this is the priority for hydration)
+		if requestReadyEvent != 0 {
+			// Quick check if request is ready (0ms timeout)
+			waitResult, _, _ := procWaitForSingleObject.Call(
+				requestReadyEvent,
+				0, // No wait - just check
+			)
+			if waitResult == 0 { // WAIT_OBJECT_0 = 0
+				b.logger.Debug("handling shared fetch request")
+				handleSharedFetchRequest(b.logger)
+				continue // Check for more requests immediately
+			}
+		}
+
+		// Wait for a queue request with short timeout (allows checking other events)
+		result := C.CfapiBridgeWaitForRequest(50) // 50ms timeout
 		if result == C.CFAPI_BRIDGE_ERROR_TIMEOUT {
-			continue // Check stop channel and wait again
+			continue // Check stop channel and shared fetch again
 		}
 		if result != C.CFAPI_BRIDGE_OK {
 			b.logger.Error("error waiting for request", zap.Int("result", int(result)))
@@ -314,6 +522,12 @@ func (b *BridgeManager) processLoop(ctx context.Context) {
 		b.dispatchRequest(&req)
 	}
 }
+
+// WaitForSingleObject Windows API
+var (
+	kernel32                 = syscall.NewLazyDLL("kernel32.dll")
+	procWaitForSingleObject  = kernel32.NewProc("WaitForSingleObject")
+)
 
 // dispatchRequest handles a single callback request.
 func (b *BridgeManager) dispatchRequest(req *C.CfapiBridgeRequest) {
@@ -340,8 +554,14 @@ func (b *BridgeManager) dispatchRequest(req *C.CfapiBridgeRequest) {
 }
 
 // handleFetchData handles a FETCH_DATA callback.
+// The C callback enqueues the request and returns immediately.
+// We process it here and call CfExecute(TransferData) to send data to Windows.
 func (b *BridgeManager) handleFetchData(req *C.CfapiBridgeRequest, handler func(*BridgeFetchDataRequest) error) {
 	filePath := wcharToString((*uint16)(unsafe.Pointer(&req.filePath[0])))
+	// CRITICAL: Use uintptr instead of unsafe.Pointer for Windows HANDLE.
+	// The GC would try to interpret unsafe.Pointer as a Go pointer and crash
+	// with "invalid pointer found on stack" because HANDLEs are small integers.
+	completionEvent := uintptr(req.completionEvent)
 
 	b.logger.Debug("handling FETCH_DATA",
 		zap.String("path", filePath),
@@ -350,19 +570,29 @@ func (b *BridgeManager) handleFetchData(req *C.CfapiBridgeRequest, handler func(
 		zap.Int64("length", int64(req.requiredLength)),
 	)
 
+	// Always signal completion at the end to unblock the C callback
+	defer func() {
+		if completionEvent != 0 {
+			b.logger.Debug("signaling transfer complete")
+			C.CfapiBridgeSignalTransferComplete(unsafe.Pointer(completionEvent))
+		}
+	}()
+
 	if handler == nil {
 		b.logger.Warn("no FETCH_DATA handler registered, reporting error")
-		C.CfapiBridgeTransferError(req.connectionKey, req.transferKey, C.int32_t(E_FAIL))
+		C.CfapiBridgeTransferError(req.connectionKey, req.transferKey, req.requestKey, C.int32_t(E_FAIL))
 		return
 	}
 
 	fetchReq := &BridgeFetchDataRequest{
-		ConnectionKey:  int64(req.connectionKey),
-		TransferKey:    int64(req.transferKey),
-		FilePath:       filePath,
-		FileSize:       int64(req.fileSize),
-		RequiredOffset: int64(req.requiredOffset),
-		RequiredLength: int64(req.requiredLength),
+		ConnectionKey:   int64(req.connectionKey),
+		TransferKey:     int64(req.transferKey),
+		RequestKey:      int64(req.requestKey),
+		FilePath:        filePath,
+		FileSize:        int64(req.fileSize),
+		RequiredOffset:  int64(req.requiredOffset),
+		RequiredLength:  int64(req.requiredLength),
+		CompletionEvent: completionEvent, // Already uintptr
 	}
 
 	if err := handler(fetchReq); err != nil {
@@ -370,7 +600,18 @@ func (b *BridgeManager) handleFetchData(req *C.CfapiBridgeRequest, handler func(
 			zap.String("path", filePath),
 			zap.Error(err),
 		)
-		C.CfapiBridgeTransferError(req.connectionKey, req.transferKey, C.int32_t(E_FAIL))
+		C.CfapiBridgeTransferError(req.connectionKey, req.transferKey, req.requestKey, C.int32_t(E_FAIL))
+	} else {
+		// Signal to Windows that hydration is complete (ACK_DATA)
+		result := C.CfapiBridgeTransferComplete(req.connectionKey, req.transferKey, req.requestKey)
+		if result != C.CFAPI_BRIDGE_OK {
+			b.logger.Error("failed to signal transfer complete",
+				zap.String("path", filePath),
+				zap.Int32("result", int32(result)),
+			)
+		} else {
+			b.logger.Debug("transfer complete signaled to Windows", zap.String("path", filePath))
+		}
 	}
 }
 
@@ -441,17 +682,24 @@ func wcharToString(ptr *uint16) string {
 }
 
 // TransferData sends data for a hydration request.
-func (b *BridgeManager) TransferData(connectionKey, transferKey int64, data []byte, offset int64) error {
+func (b *BridgeManager) TransferData(connectionKey, transferKey, requestKey int64, data []byte, offset int64, isLastChunk bool) error {
 	if len(data) == 0 {
 		return nil
+	}
+
+	flags := int32(0)
+	if isLastChunk {
+		flags = C.CF_OPERATION_TRANSFER_DATA_FLAG_MARK_IN_SYNC
 	}
 
 	result := C.CfapiBridgeTransferData(
 		C.int64_t(connectionKey),
 		C.int64_t(transferKey),
+		C.int64_t(requestKey),
 		unsafe.Pointer(&data[0]),
 		C.int64_t(len(data)),
 		C.int64_t(offset),
+		C.int32_t(flags),
 	)
 
 	if result != C.CFAPI_BRIDGE_OK {
@@ -462,10 +710,11 @@ func (b *BridgeManager) TransferData(connectionKey, transferKey int64, data []by
 }
 
 // TransferComplete completes a hydration request.
-func (b *BridgeManager) TransferComplete(connectionKey, transferKey int64) error {
+func (b *BridgeManager) TransferComplete(connectionKey, transferKey, requestKey int64) error {
 	result := C.CfapiBridgeTransferComplete(
 		C.int64_t(connectionKey),
 		C.int64_t(transferKey),
+		C.int64_t(requestKey),
 	)
 
 	if result != C.CFAPI_BRIDGE_OK {
@@ -476,10 +725,11 @@ func (b *BridgeManager) TransferComplete(connectionKey, transferKey int64) error
 }
 
 // TransferError reports an error for a hydration request.
-func (b *BridgeManager) TransferError(connectionKey, transferKey int64, hresult int32) error {
+func (b *BridgeManager) TransferError(connectionKey, transferKey, requestKey int64, hresult int32) error {
 	result := C.CfapiBridgeTransferError(
 		C.int64_t(connectionKey),
 		C.int64_t(transferKey),
+		C.int64_t(requestKey),
 		C.int32_t(hresult),
 	)
 

@@ -135,12 +135,14 @@ git checkout -b fix/correction-bug
 
 ### 3. Développer
 
+**⚠️ IMPORTANT**: Toujours utiliser MSYS2 MinGW64 GCC pour la compilation !
+
 ```bash
 # Installer les dépendances
 go mod download
 
 # Lancer les tests
-go test ./...
+export PATH="/c/msys64/mingw64/bin:$PATH" && go test ./...
 
 # Vérifier le formatage
 go fmt ./...
@@ -148,53 +150,55 @@ go fmt ./...
 # Linter
 golangci-lint run
 
-# Build
-go build -o anemone_sync.exe cmd/smbsync/main.go
+# Build (Windows)
+export PATH="/c/msys64/mingw64/bin:$PATH" && go build -o anemonesync.exe ./cmd/anemonesync/
 ```
+
+Voir [CLAUDE.md](CLAUDE.md) pour plus de détails sur l'environnement de développement.
 
 ### 4. Commiter
 
 **Format des messages de commit**:
 
 ```
-Type: Description courte (max 50 caractères)
+type(scope): Brief summary
 
-Description détaillée optionnelle (wrap à 72 caractères)
+Details if needed.
 
-- Point 1
-- Point 2
-
-Fixes #123
+Co-Authored-By: Claude <noreply@anthropic.com>
 ```
 
 **Types de commit**:
-- `feat:` Nouvelle fonctionnalité
-- `fix:` Correction de bug
-- `docs:` Documentation
-- `style:` Formatage (pas de changement de code)
-- `refactor:` Refactoring
-- `test:` Ajout/modification de tests
-- `chore:` Maintenance (deps, build, etc.)
+- `feat` - Nouvelle fonctionnalité
+- `fix` - Correction de bug
+- `docs` - Documentation
+- `refactor` - Refactoring
+- `test` - Ajout/modification de tests
+- `chore` - Maintenance (deps, build, etc.)
+
+**Scopes courants**: `sync`, `smb`, `app`, `db`, `scanner`, `cache`
 
 **Exemples**:
 ```
-feat: Add file scanner for local directories
+feat(sync): Add stop button for running sync
 
-Implement recursive file scanner with support for:
-- Metadata extraction (size, mtime)
-- Permission error handling
-- Exclusion patterns
+Implement cancel functionality with context cancellation
+for all sync operations.
 
-Closes #42
+Co-Authored-By: Claude <noreply@anthropic.com>
 ```
 
 ```
-fix: Prevent panic when config file is missing
+fix(smb): Handle connection timeout gracefully
 
-Handle missing config file gracefully by using default values
-instead of panicking.
+Add retry logic with exponential backoff for transient
+network errors.
 
-Fixes #56
+Co-Authored-By: Claude <noreply@anthropic.com>
+```
+
+```
+docs: Update SESSION_STATE.md - Session 021 complete
 ```
 
 ### 5. Pousser et créer une PR
@@ -323,25 +327,30 @@ Les features importantes doivent être discutées avant implémentation:
 
 ## Structure du projet
 
-Voir [PROJECT.md](PROJECT.md) pour l'architecture complète.
+Voir [ARCHITECTURE.md](ARCHITECTURE.md) pour l'architecture complète.
 
 ```
-anemone_sync/
-├── cmd/              # Points d'entrée
-├── internal/         # Code privé de l'application
-├── pkg/              # Code réutilisable publiquement
-├── configs/          # Configurations par défaut
-├── docs/             # Documentation
-└── sessions/         # Historique des sessions de dev
+AnemoneSync/
+├── cmd/anemonesync/  # Point d'entrée application
+├── internal/
+│   ├── app/         # Application Desktop (Fyne + systray)
+│   ├── sync/        # Moteur de synchronisation
+│   ├── smb/         # Client SMB + credentials
+│   ├── database/    # SQLite chiffrée
+│   ├── scanner/     # Scanner de fichiers
+│   └── cache/       # Cache intelligent
+├── configs/         # Configurations par défaut
+├── docs/            # Documentation
+└── sessions/        # Sessions de développement
 ```
 
 ---
 
 ## Ressources
 
-- [PROJECT.md](PROJECT.md) - Spécifications complètes
+- [CLAUDE.md](CLAUDE.md) - Instructions de développement
+- [ARCHITECTURE.md](ARCHITECTURE.md) - Architecture technique
 - [INSTALLATION.md](INSTALLATION.md) - Guide d'installation
-- [docs/INSTALLER.md](docs/INSTALLER.md) - Documentation installeur
 - [Go Code Review Comments](https://github.com/golang/go/wiki/CodeReviewComments)
 - [Effective Go](https://golang.org/doc/effective_go.html)
 

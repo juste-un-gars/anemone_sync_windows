@@ -42,8 +42,15 @@ func CreatePlaceholders(basePath string, placeholders []CF_PLACEHOLDER_CREATE_IN
 	fmt.Printf("[DEBUG CloudFiles] CreatePlaceholders result: HRESULT=0x%08X, processed=%d/%d, lastErr=%v\n",
 		hr, entriesProcessed, len(placeholders), lastErr)
 
-	if hr != S_OK {
+	// 0x800700B7 = HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS) - not an error if file exists
+	const HRESULT_ALREADY_EXISTS = 0x800700B7
+
+	if hr != S_OK && hr != HRESULT_ALREADY_EXISTS {
 		return fmt.Errorf("CfCreatePlaceholders failed: HRESULT 0x%08X (processed %d/%d)", hr, entriesProcessed, len(placeholders))
+	}
+
+	if hr == HRESULT_ALREADY_EXISTS {
+		fmt.Printf("[DEBUG CloudFiles] CreatePlaceholders: some placeholders already exist (OK)\n")
 	}
 
 	return nil
@@ -90,7 +97,10 @@ func DehydratePlaceholder(fileHandle windows.Handle, startingOffset, length int6
 	offset := LARGE_INTEGER{QuadPart: startingOffset}
 	size := LARGE_INTEGER{QuadPart: length}
 
-	hr, _, _ := procCfDehydratePlaceholder.Call(
+	fmt.Printf("[DEBUG Dehydrate] Calling CfDehydratePlaceholder: handle=%v, offset=%d, length=%d, flags=%d\n",
+		fileHandle, startingOffset, length, flags)
+
+	hr, _, lastErr := procCfDehydratePlaceholder.Call(
 		uintptr(fileHandle),
 		uintptr(unsafe.Pointer(&offset)),
 		uintptr(unsafe.Pointer(&size)),
@@ -98,8 +108,10 @@ func DehydratePlaceholder(fileHandle windows.Handle, startingOffset, length int6
 		0, // Overlapped - NULL for synchronous
 	)
 
+	fmt.Printf("[DEBUG Dehydrate] CfDehydratePlaceholder result: HRESULT=0x%08X, lastErr=%v\n", hr, lastErr)
+
 	if hr != S_OK {
-		return fmt.Errorf("CfDehydratePlaceholder failed: HRESULT 0x%08X", hr)
+		return fmt.Errorf("CfDehydratePlaceholder failed: HRESULT 0x%08X (%s)", hr, decodeHRESULT(uint32(hr)))
 	}
 
 	return nil

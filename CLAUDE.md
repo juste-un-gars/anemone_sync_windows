@@ -4,6 +4,20 @@ This file provides guidance to Claude Code when working with code in this reposi
 
 ---
 
+## QUICK REFERENCE - READ FIRST
+
+**Critical rules that apply to EVERY session:**
+
+1. **Incremental only** - Max 150 lines per iteration, STOP for validation
+2. **No hardcoding** - No secrets, paths, credentials in code
+3. **MSYS2 MinGW64** - ALWAYS use for compilation (not TDM-GCC)
+4. **Security audit** - MANDATORY before "project complete" status
+5. **Stop points** - Wait for "OK"/"validated" after each module
+
+**If unsure, read the relevant section below.**
+
+---
+
 ## Project Context
 
 **Project Name:** AnemoneSync
@@ -24,8 +38,8 @@ export PATH="/c/msys64/mingw64/bin:$PATH" && go build -o anemonesync.exe ./cmd/a
 ```
 
 ### Pourquoi ?
-- Ce projet utilise Fyne (GUI) qui nécessite CGO
-- TDM-GCC 10.3.0 (souvent dans le PATH par défaut) produit des binaires corrompus
+- Ce projet utilise Fyne (GUI) qui necessite CGO
+- TDM-GCC 10.3.0 (souvent dans le PATH par defaut) produit des binaires corrompus
 - Erreur si mauvais compilateur : "CETTE APPLICATION NE PEUT PAS S'EXECUTER SUR VOTRE PC" ou "n'est pas une application Win32 valide"
 - MSYS2 MinGW64 GCC 15.2.0 fonctionne correctement
 
@@ -90,6 +104,33 @@ Waiting for your validation before continuing.
 - Relative paths or configurable base paths
 - Secret managers for production (Vault, AWS Secrets, etc.)
 
+### Logging Standards (Go/Zap)
+
+**Goal: Comprehensive, configurable logging for debugging and monitoring.**
+
+This project uses `go.uber.org/zap` for structured logging.
+
+**Log Levels:**
+```
+DEBUG   - Verbose details (dev only)
+INFO    - Normal operations (sync started, file downloaded)
+WARN    - Suspicious behavior (connection retry, timeout)
+ERROR   - Handled errors (connection failed, file not found)
+FATAL   - Unrecoverable errors (app crash)
+```
+
+**What to Log:**
+- Sync operations (start, progress, complete)
+- SMB connections (connect, disconnect, errors)
+- File operations (download, upload, delete)
+- Cloud Files callbacks (hydration, dehydration)
+- Errors with context
+
+**NEVER Log:**
+- Passwords, credentials, tokens
+- Full file contents
+- Personal data
+
 ### Development Order (Enforce)
 
 1. **Foundation first** - Config, DB, Auth
@@ -113,10 +154,10 @@ Waiting for your validation before continuing.
 
 **Naming convention for split files:**
 ```
-app.go           → Core struct, New(), Run(), Shutdown()
-app_jobs.go      → Job-related methods
-app_sync.go      → Sync-related methods
-app_settings.go  → Config/settings methods
+app.go           -> Core struct, New(), Run(), Shutdown()
+app_jobs.go      -> Job-related methods
+app_sync.go      -> Sync-related methods
+app_settings.go  -> Config/settings methods
 ```
 
 **Benefits of smaller files:**
@@ -362,6 +403,13 @@ govulncheck ./...
 - [ ] Error pages don't leak stack traces
 - [ ] Admin interfaces protected/hidden
 
+#### 7. Logging Security
+- [ ] No passwords, tokens, API keys, secrets in logs
+- [ ] No personal IDs or sensitive data in logs
+- [ ] Session tokens not logged (only hash/ID if needed)
+- [ ] Log files not publicly accessible
+- [ ] Log rotation configured
+
 ### Audit Report Template
 
 ```markdown
@@ -472,6 +520,7 @@ export PATH="/c/msys64/mingw64/bin:$PATH" && go build -o testharness.exe ./test/
 - [x] First sync wizard / guided setup
 - [x] CLI interface (`--list-jobs`, `--sync <job-id>`, `--sync-all`)
 - [x] Cloud Files API hydration (Files On Demand - placeholders + hydration a la demande)
+- [ ] Cloud Files API dehydration (Free Up Space)
 
 ---
 
@@ -483,5 +532,5 @@ export PATH="/c/msys64/mingw64/bin:$PATH" && go build -o testharness.exe ./test/
 
 ---
 
-**Last Updated:** 2026-01-28
-**Version:** 3.2.0
+**Last Updated:** 2026-01-29
+**Version:** 3.3.0

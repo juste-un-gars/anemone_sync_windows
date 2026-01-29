@@ -153,6 +153,11 @@ func (a *SMBClientAdapter) listRecursive(ctx context.Context, path string, files
 				relativePath = strings.TrimPrefix(relativePath, "/")
 			}
 
+			a.logger.Debug("found remote file",
+				zap.String("path", relativePath),
+				zap.Int64("size", entry.Size),
+				zap.Time("mod_time", entry.ModTime),
+			)
 			*files = append(*files, RemoteFileInfo{
 				Path:        relativePath,
 				Size:        entry.Size,

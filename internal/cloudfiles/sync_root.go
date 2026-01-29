@@ -47,10 +47,11 @@ type FetchDataCallback func(info *FetchDataInfo) error
 
 // FetchDataInfo contains information about a fetch data request.
 type FetchDataInfo struct {
-	ConnectionKey CF_CONNECTION_KEY
-	TransferKey   CF_TRANSFER_KEY
-	FilePath      string // Full path to the file
-	FileSize      int64
+	ConnectionKey  CF_CONNECTION_KEY
+	TransferKey    CF_TRANSFER_KEY
+	RequestKey     int64 // Required for CfExecute in async operations
+	FilePath       string // Full path to the file
+	FileSize       int64
 	RequiredOffset int64
 	RequiredLength int64
 }
@@ -283,6 +284,7 @@ func (m *SyncRootManager) ConnectWithBridge(ctx context.Context, logger *zap.Log
 			info := &FetchDataInfo{
 				ConnectionKey:  CF_CONNECTION_KEY(req.ConnectionKey),
 				TransferKey:    CF_TRANSFER_KEY(req.TransferKey),
+				RequestKey:     req.RequestKey,
 				FilePath:       req.FilePath,
 				FileSize:       req.FileSize,
 				RequiredOffset: req.RequiredOffset,

@@ -54,15 +54,12 @@ func TestScanner_FirstScan(t *testing.T) {
 	h.AssertEqual(0, len(result.UnchangedFiles), "unchanged files")
 	h.AssertEqual(0, len(result.DeletedFiles), "deleted files")
 
-	// Verify database
-	states, err := db.GetAllFileStates(jobID)
-	h.AssertNoError(err, "get file states")
-	h.AssertEqual(10, len(states), "file states in DB")
-
-	// Verify hashes are not empty
-	for _, state := range states {
-		if state.Hash == "" {
-			t.Error("hash should not be empty")
+	// NOTE: Scanner no longer updates files_state during scan.
+	// The cache (files_state) is only updated after a successful sync.
+	// Verify all new files have hashes computed
+	for _, f := range result.NewFiles {
+		if f.Hash == "" {
+			t.Errorf("hash should not be empty for %s", f.LocalPath)
 		}
 	}
 }
@@ -92,12 +89,15 @@ func TestScanner_NoChanges(t *testing.T) {
 	defer scanner.Close()
 
 	// First scan
-	_, err = scanner.Scan(context.Background(), ScanRequest{
+	firstResult, err := scanner.Scan(context.Background(), ScanRequest{
 		JobID:      jobID,
 		BasePath:   tempDir,
 		RemoteBase: "\\\\server\\share",
 	})
 	h.AssertNoError(err, "first scan")
+
+	// Simulate successful sync (updates files_state with last_sync)
+	h.SimulateSyncComplete(db, jobID, firstResult.NewFiles)
 
 	// Second scan immediately
 	result, err := scanner.Scan(context.Background(), ScanRequest{
@@ -142,12 +142,15 @@ func TestScanner_ModifiedFiles(t *testing.T) {
 	defer scanner.Close()
 
 	// First scan
-	_, err = scanner.Scan(context.Background(), ScanRequest{
+	firstResult, err := scanner.Scan(context.Background(), ScanRequest{
 		JobID:      jobID,
 		BasePath:   tempDir,
 		RemoteBase: "\\\\server\\share",
 	})
 	h.AssertNoError(err, "first scan")
+
+	// Simulate successful sync
+	h.SimulateSyncComplete(db, jobID, firstResult.NewFiles)
 
 	// Modify 3 files
 	for i := 0; i < 3; i++ {
@@ -192,12 +195,15 @@ func TestScanner_DeletedFiles(t *testing.T) {
 	defer scanner.Close()
 
 	// First scan
-	_, err = scanner.Scan(context.Background(), ScanRequest{
+	firstResult, err := scanner.Scan(context.Background(), ScanRequest{
 		JobID:      jobID,
 		BasePath:   tempDir,
 		RemoteBase: "\\\\server\\share",
 	})
 	h.AssertNoError(err, "first scan")
+
+	// Simulate successful sync
+	h.SimulateSyncComplete(db, jobID, firstResult.NewFiles)
 
 	// Delete 2 files
 	os.Remove(files[0])

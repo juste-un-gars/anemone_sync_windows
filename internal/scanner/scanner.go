@@ -21,10 +21,10 @@ type Scanner struct {
 	hasher   *Hasher
 	walker   *Walker
 
-	mu         sync.Mutex
-	scanning   bool
-	batchSize  int           // Number of files to batch for DB updates
-	batchDelay time.Duration // Time to wait before flushing batch
+	mu           sync.Mutex
+	scanningJobs map[int64]bool // Track which jobs are currently scanning
+	batchSize    int            // Number of files to batch for DB updates
+	batchDelay   time.Duration  // Time to wait before flushing batch
 }
 
 // ScanRequest represents a scan request
@@ -142,15 +142,15 @@ func NewScanner(cfg *config.Config, db *database.DB, logger *zap.Logger) (*Scann
 	walker := NewWalker(excluder, logger)
 
 	return &Scanner{
-		db:         db,
-		logger:     logger,
-		config:     cfg,
-		excluder:   excluder,
-		hasher:     hasher,
-		walker:     walker,
-		scanning:   false,
-		batchSize:  100,             // Batch 100 files for DB updates
-		batchDelay: 5 * time.Second, // Or 5 seconds, whichever comes first
+		db:           db,
+		logger:       logger,
+		config:       cfg,
+		excluder:     excluder,
+		hasher:       hasher,
+		walker:       walker,
+		scanningJobs: make(map[int64]bool),
+		batchSize:    100,             // Batch 100 files for DB updates
+		batchDelay:   5 * time.Second, // Or 5 seconds, whichever comes first
 	}, nil
 }
 
@@ -158,16 +158,16 @@ func NewScanner(cfg *config.Config, db *database.DB, logger *zap.Logger) (*Scann
 // Implements the 3-step change detection algorithm
 func (s *Scanner) Scan(ctx context.Context, req ScanRequest) (*ScanResult, error) {
 	s.mu.Lock()
-	if s.scanning {
+	if s.scanningJobs[req.JobID] {
 		s.mu.Unlock()
-		return nil, fmt.Errorf("scan already in progress")
+		return nil, fmt.Errorf("scan already in progress for job %d", req.JobID)
 	}
-	s.scanning = true
+	s.scanningJobs[req.JobID] = true
 	s.mu.Unlock()
 
 	defer func() {
 		s.mu.Lock()
-		s.scanning = false
+		delete(s.scanningJobs, req.JobID)
 		s.mu.Unlock()
 	}()
 
@@ -197,31 +197,12 @@ func (s *Scanner) Scan(ctx context.Context, req ScanRequest) (*ScanResult, error
 	// Track files found during scan
 	foundFiles := make(map[string]bool)
 
-	// Batch for DB updates
-	var batch []*database.FileState
-	batchMu := sync.Mutex{}
-	lastBatchFlush := time.Now()
-
-	// Flush batch helper
-	flushBatch := func() error {
-		batchMu.Lock()
-		defer batchMu.Unlock()
-
-		if len(batch) == 0 {
-			return nil
-		}
-
-		if err := s.bulkUpdateFileStates(batch); err != nil {
-			return WrapError(err, "flush batch")
-		}
-
-		s.logger.Debug("flushed batch",
-			zap.Int("count", len(batch)))
-
-		batch = make([]*database.FileState, 0)
-		lastBatchFlush = time.Now()
-		return nil
-	}
+	// NOTE: We no longer update files_state during scan.
+	// The cache (files_state) should only be updated AFTER successful sync,
+	// not during scanning. This ensures 3-way merge works correctly:
+	// - cache = state after last successful sync
+	// - local = current local state (from scanner)
+	// - remote = current remote state (from manifest/SMB)
 
 	// Walk the directory tree
 	err := s.walker.Walk(req.JobID, req.BasePath, func(path string, metadata *FileMetadata) error {
@@ -268,31 +249,6 @@ func (s *Scanner) Scan(ctx context.Context, req ScanRequest) (*ScanResult, error
 
 		result.ProcessedFiles++
 
-		// Convert to FileState for batch
-		fileState := &database.FileState{
-			JobID:      req.JobID,
-			LocalPath:  fileInfo.LocalPath,
-			RemotePath: fileInfo.RemotePath,
-			Size:       fileInfo.Size,
-			MTime:      fileInfo.MTime.Unix(),
-			Hash:       fileInfo.Hash,
-			SyncStatus: "idle",
-		}
-
-		batchMu.Lock()
-		batch = append(batch, fileState)
-		batchLen := len(batch)
-		timeSinceFlush := time.Since(lastBatchFlush)
-		batchMu.Unlock()
-
-		// Flush batch if size or time threshold reached
-		if batchLen >= s.batchSize || timeSinceFlush >= s.batchDelay {
-			if err := flushBatch(); err != nil {
-				s.logger.Error("failed to flush batch",
-					zap.Error(err))
-			}
-		}
-
 		// Log progress every 1000 files
 		if result.ProcessedFiles%1000 == 0 {
 			s.logger.Info("scan progress",
@@ -309,11 +265,6 @@ func (s *Scanner) Scan(ctx context.Context, req ScanRequest) (*ScanResult, error
 	if err != nil {
 		s.logger.Error("walk failed", zap.Error(err))
 		return result, err
-	}
-
-	// Flush any remaining batch
-	if err := flushBatch(); err != nil {
-		s.logger.Error("failed to flush final batch", zap.Error(err))
 	}
 
 	// Detect deleted files (in DB but not found during walk)
@@ -469,19 +420,6 @@ func (s *Scanner) getFileState(jobID int64, localPath string) (*database.FileSta
 	return state, nil
 }
 
-// bulkUpdateFileStates updates multiple file states in a single transaction
-func (s *Scanner) bulkUpdateFileStates(states []*database.FileState) error {
-	if len(states) == 0 {
-		return nil
-	}
-
-	if err := s.db.BulkUpdateFileStates(states); err != nil {
-		return WrapError(err, "bulk update %d file states", len(states))
-	}
-
-	return nil
-}
-
 // detectDeletedFiles detects files that are in DB but were not found during scan
 func (s *Scanner) detectDeletedFiles(jobID int64, foundFiles map[string]bool) ([]*FileInfo, error) {
 	// Get all files from database for this job
@@ -526,9 +464,16 @@ func (s *Scanner) Close() error {
 	return nil
 }
 
-// IsScanning returns whether a scan is currently in progress
+// IsScanning returns whether any scan is currently in progress
 func (s *Scanner) IsScanning() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.scanning
+	return len(s.scanningJobs) > 0
+}
+
+// IsScanningJob returns whether a specific job is currently scanning
+func (s *Scanner) IsScanningJob(jobID int64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.scanningJobs[jobID]
 }

@@ -62,15 +62,15 @@ type SyncHistory struct {
 	CreatedAt        time.Time `json:"created_at"`
 }
 
-// SMBServer représente un serveur SMB configuré
+// SMBServer représente un serveur SMB configuré (sans share - choisi au niveau job)
 type SMBServer struct {
 	ID                     int64      `json:"id"`
 	Name                   string     `json:"name"`
 	Host                   string     `json:"host"`
 	Port                   int        `json:"port"`
-	Share                  string     `json:"share"`
+	Username               string     `json:"username"` // Username for display (password in keystore)
 	Domain                 string     `json:"domain,omitempty"`
-	CredentialID           string     `json:"credential_id"` // ID dans le keystore
+	CredentialID           string     `json:"credential_id"` // ID dans le keystore (format: host)
 	SMBVersion             string     `json:"smb_version,omitempty"`
 	LastConnectionTest     *time.Time `json:"last_connection_test,omitempty"`
 	LastConnectionStatus   string     `json:"last_connection_status,omitempty"`

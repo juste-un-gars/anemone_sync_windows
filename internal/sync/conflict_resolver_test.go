@@ -349,23 +349,31 @@ func TestResolveConflictsMixed(t *testing.T) {
 func TestResolveConflictsMissingFileInfo(t *testing.T) {
 	resolver, _ := NewConflictResolver("recent", zap.NewNop())
 
+	// Test case: Local deleted, remote modified (should download with "recent" policy)
 	decisions := []*cache.SyncDecision{
 		{
-			LocalPath:       "missing.txt",
-			RemotePath:      "missing.txt",
-			LocalInfo:       nil, // Missing
-			RemoteInfo:      &cache.FileInfo{Path: "missing.txt", Size: 100},
+			LocalPath:       "deleted_local.txt",
+			RemotePath:      "deleted_local.txt",
+			LocalInfo:       nil, // Deleted locally
+			RemoteInfo:      &cache.FileInfo{Path: "deleted_local.txt", Size: 100},
+			CachedInfo:      &cache.FileInfo{Path: "deleted_local.txt", Size: 50}, // Was different
 			NeedsResolution: true,
 		},
 	}
 
 	resolved, unresolved := resolver.ResolveConflicts(decisions)
 
-	if len(resolved) != 0 {
-		t.Errorf("expected 0 resolved (missing file info), got %d", len(resolved))
+	// With the new behavior, mod/del conflicts are resolved
+	if len(resolved) != 1 {
+		t.Errorf("expected 1 resolved (mod/del conflict), got %d", len(resolved))
 	}
-	if len(unresolved) != 1 {
-		t.Errorf("expected 1 unresolved, got %d", len(unresolved))
+	if len(unresolved) != 0 {
+		t.Errorf("expected 0 unresolved, got %d", len(unresolved))
+	}
+
+	// Should resolve to download (keep the modified remote)
+	if len(resolved) > 0 && resolved[0].Action != cache.ActionDownload {
+		t.Errorf("expected ActionDownload, got %s", resolved[0].Action)
 	}
 }
 

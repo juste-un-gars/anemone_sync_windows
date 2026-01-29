@@ -2,6 +2,8 @@ package sync
 
 import (
 	"fmt"
+	"path/filepath"
+	"strings"
 
 	"github.com/juste-un-gars/anemone_sync_windows/internal/cache"
 	"go.uber.org/zap"
@@ -22,6 +24,9 @@ const (
 
 	// ConflictResolutionAsk requires manual resolution (skipped for now)
 	ConflictResolutionAsk ConflictResolutionPolicy = "ask"
+
+	// ConflictResolutionKeepBoth keeps both files by renaming the server version
+	ConflictResolutionKeepBoth ConflictResolutionPolicy = "keep_both"
 )
 
 // ConflictResolver resolves sync conflicts based on a policy
@@ -83,13 +88,9 @@ func (cr *ConflictResolver) ResolveConflicts(decisions []*cache.SyncDecision) (r
 
 // resolveConflict resolves a single conflict based on the policy
 func (cr *ConflictResolver) resolveConflict(decision *cache.SyncDecision) *cache.SyncDecision {
+	// Handle modification vs deletion conflicts (one file info is nil)
 	if decision.LocalInfo == nil || decision.RemoteInfo == nil {
-		// Can't resolve without both files
-		cr.logger.Warn("cannot resolve conflict: missing file info",
-			zap.String("local_path", decision.LocalPath),
-			zap.String("remote_path", decision.RemotePath),
-		)
-		return nil
+		return cr.resolveModificationVsDeletion(decision)
 	}
 
 	switch cr.policy {
@@ -109,6 +110,9 @@ func (cr *ConflictResolver) resolveConflict(decision *cache.SyncDecision) *cache
 			zap.String("remote_path", decision.RemotePath),
 		)
 		return nil
+
+	case ConflictResolutionKeepBoth:
+		return cr.resolveByKeepBoth(decision)
 
 	default:
 		cr.logger.Error("unknown conflict resolution policy",
@@ -220,6 +224,148 @@ func (cr *ConflictResolver) resolveByRemote(decision *cache.SyncDecision) *cache
 	)
 
 	return resolved
+}
+
+// resolveByKeepBoth keeps both files by downloading server version with .server suffix
+func (cr *ConflictResolver) resolveByKeepBoth(decision *cache.SyncDecision) *cache.SyncDecision {
+	// Create renamed path: file.txt -> file.server.txt
+	renamedPath := addServerSuffix(decision.LocalPath)
+
+	resolved := &cache.SyncDecision{
+		LocalPath:       renamedPath, // Download to renamed path
+		RemotePath:      decision.RemotePath,
+		Action:          cache.ActionDownload,
+		Reason:          "conflict resolved: keep both (server version renamed)",
+		LocalInfo:       nil, // No local file at this path yet
+		RemoteInfo:      decision.RemoteInfo,
+		CachedInfo:      nil,
+		NeedsResolution: false,
+	}
+
+	cr.logger.Info("conflict resolved by keeping both files",
+		zap.String("original_path", decision.LocalPath),
+		zap.String("server_path", renamedPath),
+	)
+
+	return resolved
+}
+
+// resolveModificationVsDeletion handles conflicts where one side modified and the other deleted.
+// This occurs when:
+// - LocalInfo != nil && RemoteInfo == nil: local was modified, remote was deleted
+// - LocalInfo == nil && RemoteInfo != nil: local was deleted, remote was modified
+func (cr *ConflictResolver) resolveModificationVsDeletion(decision *cache.SyncDecision) *cache.SyncDecision {
+	resolved := &cache.SyncDecision{
+		LocalPath:       decision.LocalPath,
+		RemotePath:      decision.RemotePath,
+		LocalInfo:       decision.LocalInfo,
+		RemoteInfo:      decision.RemoteInfo,
+		CachedInfo:      decision.CachedInfo,
+		NeedsResolution: false,
+	}
+
+	localModified := decision.LocalInfo != nil && decision.RemoteInfo == nil
+	remoteModified := decision.LocalInfo == nil && decision.RemoteInfo != nil
+
+	switch cr.policy {
+	case ConflictResolutionRecent:
+		// For "recent" policy, we prefer the modification over deletion
+		// because modifying a file is an intentional action
+		if localModified {
+			resolved.Action = cache.ActionUpload
+			resolved.Reason = "conflict resolved: local modified, remote deleted - keeping local modification"
+			cr.logger.Debug("mod/del conflict resolved: local modification wins",
+				zap.String("path", decision.LocalPath),
+			)
+		} else if remoteModified {
+			resolved.Action = cache.ActionDownload
+			resolved.Reason = "conflict resolved: remote modified, local deleted - keeping remote modification"
+			cr.logger.Debug("mod/del conflict resolved: remote modification wins",
+				zap.String("path", decision.LocalPath),
+			)
+		} else {
+			cr.logger.Warn("unexpected state in mod/del conflict",
+				zap.String("path", decision.LocalPath),
+			)
+			return nil
+		}
+
+	case ConflictResolutionLocal:
+		// Local preference: keep local state
+		if localModified {
+			resolved.Action = cache.ActionUpload
+			resolved.Reason = "conflict resolved: local preference - uploading local file"
+		} else {
+			// Local was deleted, so delete remote too
+			resolved.Action = cache.ActionDeleteRemote
+			resolved.Reason = "conflict resolved: local preference - deleting remote (local was deleted)"
+		}
+		cr.logger.Debug("mod/del conflict resolved by local preference",
+			zap.String("path", decision.LocalPath),
+			zap.String("action", string(resolved.Action)),
+		)
+
+	case ConflictResolutionRemote:
+		// Remote preference: keep remote state
+		if remoteModified {
+			resolved.Action = cache.ActionDownload
+			resolved.Reason = "conflict resolved: remote preference - downloading remote file"
+		} else {
+			// Remote was deleted, so delete local too
+			resolved.Action = cache.ActionDeleteLocal
+			resolved.Reason = "conflict resolved: remote preference - deleting local (remote was deleted)"
+		}
+		cr.logger.Debug("mod/del conflict resolved by remote preference",
+			zap.String("path", decision.LocalPath),
+			zap.String("action", string(resolved.Action)),
+		)
+
+	case ConflictResolutionAsk:
+		cr.logger.Info("manual resolution required for mod/del conflict",
+			zap.String("local_path", decision.LocalPath),
+			zap.String("remote_path", decision.RemotePath),
+		)
+		return nil
+
+	case ConflictResolutionKeepBoth:
+		// For keep_both, if one side was deleted, we can only keep the remaining one
+		if localModified {
+			resolved.Action = cache.ActionUpload
+			resolved.Reason = "conflict resolved: keep both - only local exists, uploading"
+		} else {
+			resolved.Action = cache.ActionDownload
+			resolved.Reason = "conflict resolved: keep both - only remote exists, downloading"
+		}
+		cr.logger.Debug("mod/del conflict resolved by keep_both",
+			zap.String("path", decision.LocalPath),
+			zap.String("action", string(resolved.Action)),
+		)
+
+	default:
+		cr.logger.Error("unknown conflict resolution policy",
+			zap.String("policy", string(cr.policy)),
+		)
+		return nil
+	}
+
+	return resolved
+}
+
+// addServerSuffix adds .server before the file extension
+// e.g., "document.pdf" -> "document.server.pdf"
+// e.g., "file" -> "file.server"
+func addServerSuffix(path string) string {
+	dir := filepath.Dir(path)
+	filename := filepath.Base(path)
+	ext := filepath.Ext(filename)
+	nameWithoutExt := strings.TrimSuffix(filename, ext)
+
+	newFilename := nameWithoutExt + ".server" + ext
+
+	if dir == "." {
+		return newFilename
+	}
+	return filepath.Join(dir, newFilename)
 }
 
 // GetPolicy returns the current conflict resolution policy

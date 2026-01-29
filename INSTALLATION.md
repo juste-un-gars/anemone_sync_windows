@@ -4,24 +4,16 @@ Ce guide vous accompagne dans l'installation des prérequis et le build du proje
 
 ## Statut actuel
 
-**Phase 0: Setup et architecture** - ✅ Structure de base créée
+**Version 1.0.0** - Application Desktop fonctionnelle ✅
 
-### Ce qui est fait
+### Fonctionnalités
 
-- ✅ Structure complète des dossiers
-- ✅ Fichiers de base (README, LICENSE, .gitignore, CHANGELOG)
-- ✅ Système d'archivage des sessions
-- ✅ Configuration de base (YAML)
-- ✅ Schéma de base de données SQLite
-- ✅ Modules de base (config, database, logger)
-- ✅ Point d'entrée main.go
-
-### Ce qui reste à faire
-
-- ⏳ Installer Go
-- ⏳ Télécharger les dépendances Go
-- ⏳ Tester la compilation
-- ⏳ Initialiser Git et pousser sur GitHub
+- ✅ Application desktop avec interface graphique (Fyne)
+- ✅ System tray avec menu contextuel
+- ✅ Synchronisation bidirectionnelle vers serveurs SMB
+- ✅ Watchers temps réel (local + remote)
+- ✅ Scheduler pour sync planifiée
+- ✅ Credentials sécurisés (Windows Credential Manager)
 
 ---
 
@@ -93,31 +85,28 @@ sudo dnf install golang
 brew install go
 ```
 
-### 2. Installation de GCC (pour SQLCipher)
+### 2. Installation de GCC (OBLIGATOIRE pour CGO/Fyne)
 
-SQLCipher nécessite un compilateur C.
+Ce projet utilise Fyne (GUI) qui nécessite CGO et donc un compilateur C.
 
-#### Windows
+#### Windows - MSYS2 MinGW64 (OBLIGATOIRE)
 
-**Option A: TDM-GCC (recommandé, léger)**
+**⚠️ ATTENTION**: N'utilisez PAS TDM-GCC ! Il produit des binaires corrompus avec ce projet.
 
-1. Téléchargez depuis [jmeubank.github.io/tdm-gcc](https://jmeubank.github.io/tdm-gcc/)
-2. Installez TDM64-GCC
-3. Ajoutez `C:\TDM-GCC-64\bin` au PATH
+1. Téléchargez et installez MSYS2 depuis [msys2.org](https://www.msys2.org/)
+2. Ouvrez le terminal MSYS2 et installez GCC:
+   ```bash
+   pacman -S mingw-w64-x86_64-gcc
+   ```
+3. Ajoutez `C:\msys64\mingw64\bin` au PATH Windows (optionnel, sinon utilisez export)
 
-**Option B: MSYS2 + MinGW-w64**
-
+**Vérification:**
 ```bash
-# Installer MSYS2 depuis https://www.msys2.org/
-# Puis dans le terminal MSYS2:
-pacman -S mingw-w64-x86_64-gcc
+/c/msys64/mingw64/bin/gcc --version
+# Doit afficher GCC 15.x.x ou supérieur
 ```
 
-Ajoutez `C:\msys64\mingw64\bin` au PATH Windows
-
 #### Linux
-
-Généralement déjà installé. Sinon:
 
 ```bash
 # Ubuntu/Debian
@@ -159,21 +148,29 @@ go mod download
 
 Cette commande téléchargera toutes les dépendances listées dans `go.mod`.
 
-### 2. Vérifier que tout compile
+### 2. Compiler l'application
+
+**⚠️ IMPORTANT**: Toujours utiliser MSYS2 MinGW64 GCC !
 
 ```bash
-go build -o anemone_sync.exe cmd/smbsync/main.go
+# Windows (Git Bash ou MSYS2)
+export PATH="/c/msys64/mingw64/bin:$PATH" && go build -o anemonesync.exe ./cmd/anemonesync/
 ```
 
-Si la compilation réussit, un fichier `anemone_sync.exe` sera créé.
+Si la compilation réussit, un fichier `anemonesync.exe` (~56MB) sera créé.
+
+**❌ Ne PAS faire:**
+```bash
+go build -o anemonesync.exe ./cmd/anemonesync/  # MAUVAIS - utilise TDM-GCC
+```
 
 ### 3. Exécuter l'application
 
 ```bash
-.\anemone_sync.exe
+./anemonesync.exe
 ```
 
-Pour l'instant, l'application affiche juste un message indiquant qu'elle est en développement.
+L'application démarre avec une icône dans le system tray. Cliquez sur l'icône pour accéder au menu (Settings, Sync Now, Quit).
 
 ---
 
@@ -261,34 +258,40 @@ Créer `.vscode/settings.json`:
 
 ---
 
-## Prochaines étapes de développement
+## Utilisation
 
-### Phase 1: Core - Moteur de synchronisation
+### Premier démarrage
 
-1. Implémenter le scanner de fichiers locaux
-2. Implémenter le client SMB basique
-3. Calculer les hash SHA256
-4. Détecter les changements (nouveau/modifié/supprimé)
-5. Transférer des fichiers (upload/download)
-6. Tests unitaires
+1. Lancez `anemonesync.exe`
+2. Cliquez sur l'icône dans le system tray → **Settings**
+3. Dans l'onglet **SMB Connections**, ajoutez votre serveur SMB
+4. Dans l'onglet **Sync Jobs**, créez un nouveau job de synchronisation
+5. Configurez le dossier local, le share SMB distant, et le mode de sync
 
-### Tests de connexion SMB
+### Modes de synchronisation
 
-Pour tester la connexion SMB, vous aurez besoin:
-- Un serveur SMB accessible (Windows Share, Samba, NAS, etc.)
-- Credentials valides
-- Accès réseau au serveur
+- **Mirror**: Synchronisation bidirectionnelle
+- **Upload only**: Local → Remote uniquement
+- **Download only**: Remote → Local uniquement
 
-Exemple de test rapide une fois le code SMB implémenté:
-```bash
-# Créer un fichier de test de configuration
-# Puis exécuter l'application avec un test de connexion
-.\anemone_sync.exe --test-smb
-```
+### Déclenchement
+
+- **Realtime**: Sync automatique quand des fichiers changent (local ou remote)
+- **Scheduled**: Sync périodique (5m, 15m, 30m, 1h)
+- **Manual**: Sync uniquement via le bouton "Sync Now"
 
 ---
 
 ## Dépannage
+
+### Erreur: "n'est pas une application Win32 valide" ou "CETTE APPLICATION NE PEUT PAS S'EXECUTER"
+
+**Cause**: Vous avez compilé avec TDM-GCC au lieu de MSYS2 MinGW64.
+
+**Solution**: Recompilez avec le bon compilateur:
+```bash
+export PATH="/c/msys64/mingw64/bin:$PATH" && go build -o anemonesync.exe ./cmd/anemonesync/
+```
 
 ### Erreur: "go: command not found"
 
@@ -307,7 +310,7 @@ source ~/.bashrc
 
 ### Erreur: "gcc: command not found" lors du build
 
-GCC n'est pas installé ou pas dans le PATH. Voir section "Installation de GCC" ci-dessus.
+MSYS2 MinGW64 GCC n'est pas installé. Voir section "Installation de GCC" ci-dessus.
 
 ### Erreur: "cannot find package"
 
@@ -317,24 +320,22 @@ go mod download
 go mod tidy
 ```
 
-### Problèmes de SQLCipher sur Windows
+### L'icône n'apparaît pas dans le system tray
 
-Si vous avez des erreurs avec SQLCipher:
-
-1. Vérifiez que GCC est bien installé: `gcc --version`
-2. Installez les outils de build: `go install github.com/mattn/go-sqlite3@latest`
-3. Si problème persiste, utilisez SQLite standard pour débuter (moins sécurisé mais plus simple)
+1. Vérifiez que l'application s'est bien lancée (pas d'erreur dans la console)
+2. Cherchez l'icône dans les icônes cachées du system tray (flèche ^)
+3. Redémarrez l'application
 
 ---
 
 ## Support et documentation
 
-- **Documentation projet**: [PROJECT.md](PROJECT.md)
-- **Spécifications complètes**: Voir PROJECT.md section "Fonctionnalités détaillées"
+- **Instructions développement**: [CLAUDE.md](CLAUDE.md)
+- **Architecture technique**: [ARCHITECTURE.md](ARCHITECTURE.md)
 - **Historique des sessions**: [SESSION_STATE.md](SESSION_STATE.md)
 - **Issues GitHub**: https://github.com/juste-un-gars/anemone_sync_windows/issues
 
 ---
 
-**Dernière mise à jour**: 2026-01-11
-**Version**: Phase 0 - Setup completé
+**Dernière mise à jour**: 2026-01-18
+**Version**: 1.0.0

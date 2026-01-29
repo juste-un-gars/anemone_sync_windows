@@ -2,12 +2,9 @@ package smb
 
 import (
 	"fmt"
-	"io"
 	"net"
-	"os"
-	"path/filepath"
+	"strings"
 	"sync"
-	"time"
 
 	"github.com/hirochachacha/go-smb2"
 	"go.uber.org/zap"
@@ -171,7 +168,11 @@ func (c *SMBClient) Disconnect() error {
 	// Close connection
 	if c.conn != nil {
 		if err := c.conn.Close(); err != nil {
-			c.logger.Warn("failed to close connection", zap.Error(err))
+			// Ignore "use of closed network connection" - happens after long transfers
+			// when server has already closed the connection (timeout)
+			if !isClosedConnectionError(err) {
+				c.logger.Warn("failed to close connection", zap.Error(err))
+			}
 		}
 		c.conn = nil
 	}
@@ -201,257 +202,8 @@ func (c *SMBClient) GetShare() string {
 	return c.share
 }
 
-// Download downloads a file from the SMB share to local filesystem
-// remotePath is relative to the share root (e.g., "folder/file.txt")
-// localPath is the absolute local path where the file will be saved
-func (c *SMBClient) Download(remotePath, localPath string) error {
-	c.mu.RLock()
-	if !c.connected {
-		c.mu.RUnlock()
-		return fmt.Errorf("not connected to SMB server")
-	}
-	fs := c.fs
-	c.mu.RUnlock()
-
-	c.logger.Debug("downloading file",
-		zap.String("remote", remotePath),
-		zap.String("local", localPath))
-
-	// Open remote file for reading
-	remoteFile, err := fs.Open(remotePath)
-	if err != nil {
-		return fmt.Errorf("failed to open remote file %s: %w", remotePath, err)
-	}
-	defer remoteFile.Close()
-
-	// Get remote file info for logging
-	remoteInfo, err := remoteFile.Stat()
-	if err != nil {
-		c.logger.Warn("failed to get remote file info", zap.Error(err))
-	}
-
-	// Create local directory if needed
-	localDir := filepath.Dir(localPath)
-	if err := os.MkdirAll(localDir, 0755); err != nil {
-		return fmt.Errorf("failed to create local directory %s: %w", localDir, err)
-	}
-
-	// Create local file
-	localFile, err := os.Create(localPath)
-	if err != nil {
-		return fmt.Errorf("failed to create local file %s: %w", localPath, err)
-	}
-	defer localFile.Close()
-
-	// Copy data from remote to local
-	written, err := io.Copy(localFile, remoteFile)
-	if err != nil {
-		// Try to clean up incomplete file
-		os.Remove(localPath)
-		return fmt.Errorf("failed to copy data: %w", err)
-	}
-
-	c.logger.Info("file downloaded successfully",
-		zap.String("remote", remotePath),
-		zap.String("local", localPath),
-		zap.Int64("bytes", written),
-		zap.Int64("size", remoteInfo.Size()))
-
-	return nil
-}
-
-// Upload uploads a file from local filesystem to the SMB share
-// localPath is the absolute local path to the file
-// remotePath is relative to the share root (e.g., "folder/file.txt")
-func (c *SMBClient) Upload(localPath, remotePath string) error {
-	c.mu.RLock()
-	if !c.connected {
-		c.mu.RUnlock()
-		return fmt.Errorf("not connected to SMB server")
-	}
-	fs := c.fs
-	c.mu.RUnlock()
-
-	c.logger.Debug("uploading file",
-		zap.String("local", localPath),
-		zap.String("remote", remotePath))
-
-	// Open local file for reading
-	localFile, err := os.Open(localPath)
-	if err != nil {
-		return fmt.Errorf("failed to open local file %s: %w", localPath, err)
-	}
-	defer localFile.Close()
-
-	// Get local file info
-	localInfo, err := localFile.Stat()
-	if err != nil {
-		return fmt.Errorf("failed to get local file info: %w", err)
-	}
-
-	// Check if it's a regular file
-	if !localInfo.Mode().IsRegular() {
-		return fmt.Errorf("not a regular file: %s", localPath)
-	}
-
-	// Create remote directory if needed
-	remoteDir := filepath.Dir(remotePath)
-	if remoteDir != "." && remoteDir != "/" {
-		// Try to create directory (ignore error if already exists)
-		_ = fs.MkdirAll(remoteDir, 0755)
-	}
-
-	// Create remote file
-	remoteFile, err := fs.Create(remotePath)
-	if err != nil {
-		return fmt.Errorf("failed to create remote file %s: %w", remotePath, err)
-	}
-	defer remoteFile.Close()
-
-	// Copy data from local to remote
-	written, err := io.Copy(remoteFile, localFile)
-	if err != nil {
-		// Try to clean up incomplete remote file
-		fs.Remove(remotePath)
-		return fmt.Errorf("failed to copy data: %w", err)
-	}
-
-	c.logger.Info("file uploaded successfully",
-		zap.String("local", localPath),
-		zap.String("remote", remotePath),
-		zap.Int64("bytes", written),
-		zap.Int64("size", localInfo.Size()))
-
-	return nil
-}
-
-// RemoteFileInfo contains metadata about a remote file or directory
-type RemoteFileInfo struct {
-	Name    string    // File or directory name
-	Path    string    // Full path relative to share root
-	Size    int64     // Size in bytes (0 for directories)
-	ModTime time.Time // Last modification time
-	IsDir   bool      // True if this is a directory
-}
-
-// ListRemote lists files and directories in the specified remote path
-// remotePath is relative to the share root (e.g., "folder" or "" for root)
-// Returns a slice of RemoteFileInfo for all entries in the directory
-func (c *SMBClient) ListRemote(remotePath string) ([]RemoteFileInfo, error) {
-	c.mu.RLock()
-	if !c.connected {
-		c.mu.RUnlock()
-		return nil, fmt.Errorf("not connected to SMB server")
-	}
-	fs := c.fs
-	c.mu.RUnlock()
-
-	c.logger.Debug("listing remote directory",
-		zap.String("remote", remotePath))
-
-	// Use "." for root if path is empty
-	if remotePath == "" {
-		remotePath = "."
-	}
-
-	// Read directory entries
-	entries, err := fs.ReadDir(remotePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list directory %s: %w", remotePath, err)
-	}
-
-	// Convert to RemoteFileInfo slice
-	result := make([]RemoteFileInfo, 0, len(entries))
-	for _, info := range entries {
-		// Build full path
-		fullPath := remotePath
-		if remotePath == "." {
-			fullPath = info.Name()
-		} else {
-			fullPath = filepath.Join(remotePath, info.Name())
-		}
-
-		result = append(result, RemoteFileInfo{
-			Name:    info.Name(),
-			Path:    fullPath,
-			Size:    info.Size(),
-			ModTime: info.ModTime(),
-			IsDir:   info.IsDir(),
-		})
-	}
-
-	c.logger.Info("remote directory listed successfully",
-		zap.String("remote", remotePath),
-		zap.Int("count", len(result)))
-
-	return result, nil
-}
-
-// GetMetadata retrieves metadata for a specific remote file or directory
-// remotePath is relative to the share root (e.g., "folder/file.txt")
-// Returns RemoteFileInfo with metadata about the file/directory
-func (c *SMBClient) GetMetadata(remotePath string) (*RemoteFileInfo, error) {
-	c.mu.RLock()
-	if !c.connected {
-		c.mu.RUnlock()
-		return nil, fmt.Errorf("not connected to SMB server")
-	}
-	fs := c.fs
-	c.mu.RUnlock()
-
-	c.logger.Debug("getting remote file metadata",
-		zap.String("remote", remotePath))
-
-	// Stat the file/directory
-	info, err := fs.Stat(remotePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get metadata for %s: %w", remotePath, err)
-	}
-
-	result := &RemoteFileInfo{
-		Name:    info.Name(),
-		Path:    remotePath,
-		Size:    info.Size(),
-		ModTime: info.ModTime(),
-		IsDir:   info.IsDir(),
-	}
-
-	c.logger.Debug("metadata retrieved successfully",
-		zap.String("remote", remotePath),
-		zap.Int64("size", result.Size),
-		zap.Bool("isDir", result.IsDir))
-
-	return result, nil
-}
-
-// Delete removes a file from the remote SMB share
-// remotePath is relative to the share root (e.g., "folder/file.txt")
-// Note: This only removes files, not directories (use RemoveAll for directories)
-func (c *SMBClient) Delete(remotePath string) error {
-	c.mu.RLock()
-	if !c.connected {
-		c.mu.RUnlock()
-		return fmt.Errorf("not connected to SMB server")
-	}
-	fs := c.fs
-	c.mu.RUnlock()
-
-	c.logger.Debug("deleting remote file",
-		zap.String("remote", remotePath))
-
-	// Remove the file
-	if err := fs.Remove(remotePath); err != nil {
-		return fmt.Errorf("failed to delete %s: %w", remotePath, err)
-	}
-
-	c.logger.Info("remote file deleted successfully",
-		zap.String("remote", remotePath))
-
-	return nil
-}
-
 // NewSMBClientFromKeyring creates a new SMB client using credentials from the system keyring
-// server and share are used to identify the credentials in the keyring
+// server is used to identify the credentials in the keyring
 func NewSMBClientFromKeyring(server, share string, logger *zap.Logger) (*SMBClient, error) {
 	if server == "" {
 		return nil, fmt.Errorf("server cannot be empty")
@@ -463,8 +215,8 @@ func NewSMBClientFromKeyring(server, share string, logger *zap.Logger) (*SMBClie
 	// Create credential manager
 	credMgr := NewCredentialManager(logger)
 
-	// Load credentials from keyring
-	creds, err := credMgr.Load(server, share)
+	// Load credentials from keyring (keyed by server only)
+	creds, err := credMgr.Load(server)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load credentials from keyring: %w", err)
 	}
@@ -472,7 +224,7 @@ func NewSMBClientFromKeyring(server, share string, logger *zap.Logger) (*SMBClie
 	// Create client config from credentials
 	cfg := &ClientConfig{
 		Server:   creds.Server,
-		Share:    creds.Share,
+		Share:    share,
 		Port:     creds.Port,
 		Username: creds.Username,
 		Password: creds.Password,
@@ -489,10 +241,9 @@ func (c *SMBClient) SaveCredentialsToKeyring() error {
 	// Create credential manager
 	credMgr := NewCredentialManager(c.logger)
 
-	// Create credentials structure
+	// Create credentials structure (without share - keyed by server only)
 	creds := &Credentials{
 		Server:   c.server,
-		Share:    c.share,
 		Port:     c.port,
 		Username: c.username,
 		Password: c.password,
@@ -512,10 +263,76 @@ func (c *SMBClient) DeleteCredentialsFromKeyring() error {
 	// Create credential manager
 	credMgr := NewCredentialManager(c.logger)
 
-	// Delete from keyring
-	if err := credMgr.Delete(c.server, c.share); err != nil {
+	// Delete from keyring (keyed by server only)
+	if err := credMgr.Delete(c.server); err != nil {
 		return fmt.Errorf("failed to delete credentials from keyring: %w", err)
 	}
 
 	return nil
+}
+
+// isClosedConnectionError checks if the error indicates the connection was already closed.
+// This is benign during disconnect - happens when server closes connection first (e.g., timeout).
+func isClosedConnectionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "use of closed network connection") ||
+		strings.Contains(errStr, "connection reset by peer") ||
+		strings.Contains(errStr, "broken pipe")
+}
+
+// ListSharesOnServer connects to a server and lists available shares
+// This is a utility function that doesn't require a full client
+func ListSharesOnServer(server string, port int, username, password, domain string, logger *zap.Logger) ([]string, error) {
+	if server == "" {
+		return nil, fmt.Errorf("server cannot be empty")
+	}
+	if port == 0 {
+		port = 445
+	}
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+
+	logger.Debug("listing shares on server",
+		zap.String("server", server),
+		zap.Int("port", port))
+
+	// Connect to server
+	addr := fmt.Sprintf("%s:%d", server, port)
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to %s: %w", addr, err)
+	}
+	defer conn.Close()
+
+	// Create SMB2 dialer
+	dialer := &smb2.Dialer{
+		Initiator: &smb2.NTLMInitiator{
+			User:     username,
+			Password: password,
+			Domain:   domain,
+		},
+	}
+
+	// Start SMB2 session
+	session, err := dialer.Dial(conn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create SMB session: %w", err)
+	}
+	defer session.Logoff()
+
+	// List shares
+	shares, err := session.ListSharenames()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list shares: %w", err)
+	}
+
+	logger.Debug("found shares",
+		zap.String("server", server),
+		zap.Strings("shares", shares))
+
+	return shares, nil
 }

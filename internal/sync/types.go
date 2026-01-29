@@ -43,6 +43,26 @@ type SyncRequest struct {
 
 	// ProgressCallback is called to report progress (optional)
 	ProgressCallback ProgressCallback
+
+	// FilesOnDemand enables placeholder mode (Windows Cloud Files API).
+	// When enabled, remote files are created as placeholders instead of downloaded.
+	// Files are hydrated (downloaded) on demand when opened.
+	FilesOnDemand bool
+
+	// PlaceholderCallback is called when placeholders need to be created.
+	// Only used when FilesOnDemand is true.
+	PlaceholderCallback PlaceholderCallback
+}
+
+// PlaceholderCallback is called to create placeholders for remote files.
+// Returns number of placeholders created and any error.
+type PlaceholderCallback func(files []PlaceholderFileInfo) (int, error)
+
+// PlaceholderFileInfo contains info needed to create a placeholder file.
+type PlaceholderFileInfo struct {
+	RelativePath string
+	Size         int64
+	ModTime      int64 // Unix timestamp
 }
 
 // SyncResult contains the result of a sync operation
@@ -59,13 +79,14 @@ type SyncResult struct {
 	Duration  time.Duration
 
 	// File counts
-	TotalFiles      int // Total files examined
-	FilesUploaded   int // Files uploaded to remote
-	FilesDownloaded int // Files downloaded from remote
-	FilesDeleted    int // Files deleted (local or remote)
-	FilesSkipped    int // Files skipped (unchanged)
-	FilesError      int // Files with errors
-	ConflictsFound  int // Conflicts detected
+	TotalFiles         int // Total files examined
+	FilesUploaded      int // Files uploaded to remote
+	FilesDownloaded    int // Files downloaded from remote
+	FilesDeleted       int // Files deleted (local or remote)
+	FilesSkipped       int // Files skipped (unchanged)
+	FilesError         int // Files with errors
+	ConflictsFound     int // Conflicts detected
+	PlaceholdersCreated int // Placeholders created (Files On Demand mode)
 
 	// Data transfer
 	BytesTransferred int64 // Total bytes transferred
@@ -242,7 +263,7 @@ func (m SyncMode) IsValid() bool {
 // IsValidConflictResolution returns true if the conflict resolution strategy is valid
 func IsValidConflictResolution(policy string) bool {
 	switch policy {
-	case "recent", "local", "remote", "ask":
+	case "recent", "local", "remote", "ask", "keep_both":
 		return true
 	default:
 		return false

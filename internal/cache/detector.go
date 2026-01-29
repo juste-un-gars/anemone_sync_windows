@@ -110,21 +110,31 @@ func (cd *ChangeDetector) decide3Way(local, remote, cached *FileInfo) (SyncActio
 
 	// Case 3: File was deleted locally but exists remotely
 	if !localExists && remoteExists && cachedExists {
+		// Check if remote file is re-created (same content, newer timestamp)
+		// This handles the case where file was deleted then re-added on remote
+		if cd.isFileRecreated(remote, cached) {
+			return ActionDownload, "file re-created remotely after local deletion"
+		}
 		if cd.filesAreSame(remote, cached) {
-			// Remote unchanged, local deleted - delete remote
+			// Remote unchanged since last sync, local deleted - delete remote
 			return ActionDeleteRemote, "file deleted locally, remove from remote"
 		}
-		// Remote changed, local deleted - conflict
+		// Remote changed (different content), local deleted - conflict
 		return ActionConflict, "file deleted locally but modified remotely"
 	}
 
 	// Case 4: File exists locally but deleted remotely
 	if localExists && !remoteExists && cachedExists {
+		// Check if local file is re-created (same content, newer timestamp)
+		// This handles the case where file was deleted then re-added locally
+		if cd.isFileRecreated(local, cached) {
+			return ActionUpload, "file re-created locally after remote deletion"
+		}
 		if cd.filesAreSame(local, cached) {
-			// Local unchanged, remote deleted - delete local
+			// Local unchanged since last sync, remote deleted - delete local
 			return ActionDeleteLocal, "file deleted remotely, remove local copy"
 		}
-		// Local changed, remote deleted - conflict
+		// Local changed (different content), remote deleted - conflict
 		return ActionConflict, "file modified locally but deleted remotely"
 	}
 
@@ -184,6 +194,31 @@ func (cd *ChangeDetector) filesAreSame(f1, f2 *FileInfo) bool {
 	// If no hashes available, compare size and mtime (less reliable)
 	// Truncate to second precision for filesystem compatibility
 	return f1.MTime.Truncate(time.Second).Equal(f2.MTime.Truncate(time.Second))
+}
+
+// isFileRecreated checks if f1 appears to be a re-creation of f2.
+// A file is considered "re-created" if it has:
+// - Same content (same size and hash) as the cached version
+// - But a newer modification time
+// This handles the case where a user re-adds the same file after it was deleted.
+func (cd *ChangeDetector) isFileRecreated(f1, f2 *FileInfo) bool {
+	if f1 == nil || f2 == nil {
+		return false
+	}
+
+	// Must have same content (size and hash)
+	if f1.Size != f2.Size {
+		return false
+	}
+	if f1.Hash != "" && f2.Hash != "" && f1.Hash != f2.Hash {
+		return false
+	}
+
+	// Must be newer than cached
+	t1 := f1.MTime.Truncate(time.Second)
+	t2 := f2.MTime.Truncate(time.Second)
+
+	return t1.After(t2)
 }
 
 // BatchDetermineSyncActions determines sync actions for multiple files

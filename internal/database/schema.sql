@@ -85,21 +85,20 @@ CREATE INDEX IF NOT EXISTS idx_sync_history_job_id ON sync_history(job_id);
 CREATE INDEX IF NOT EXISTS idx_sync_history_timestamp ON sync_history(timestamp);
 CREATE INDEX IF NOT EXISTS idx_sync_history_status ON sync_history(status);
 
--- Table des serveurs SMB (pour référence, credentials dans keystore)
+-- Table des serveurs SMB (credentials dans keystore, share choisi au niveau job)
 CREATE TABLE IF NOT EXISTS smb_servers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
-    host TEXT NOT NULL,
+    host TEXT NOT NULL UNIQUE,
     port INTEGER DEFAULT 445,
-    share TEXT NOT NULL,
+    username TEXT NOT NULL, -- Username for display (password in keystore)
     domain TEXT,
-    credential_id TEXT NOT NULL UNIQUE, -- ID dans le keystore système
+    credential_id TEXT NOT NULL UNIQUE, -- ID dans le keystore système (format: host)
     smb_version TEXT CHECK(smb_version IN ('2.0', '2.1', '3.0', '3.1.1')),
     last_connection_test INTEGER, -- Unix timestamp
     last_connection_status TEXT CHECK(last_connection_status IN ('success', 'failed')),
     created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL,
-    UNIQUE(host, share)
+    updated_at INTEGER NOT NULL
 );
 
 -- Index pour serveurs

@@ -174,10 +174,11 @@ func (rs *RemoteScanner) scanDir(ctx context.Context, currentPath string, basePa
 			}
 		} else {
 			// Add file to result
-			relativePath := strings.TrimPrefix(entry.Path, basePath)
+			// Normalize slashes before comparing (entry.Path may use \ on Windows)
+			entryPath := filepath.ToSlash(entry.Path)
+			basePathNorm := filepath.ToSlash(basePath)
+			relativePath := strings.TrimPrefix(entryPath, basePathNorm)
 			relativePath = strings.TrimPrefix(relativePath, "/")
-			relativePath = strings.TrimPrefix(relativePath, "\\")
-			relativePath = filepath.ToSlash(relativePath)
 
 			if relativePath == "" {
 				relativePath = filepath.Base(entry.Path)

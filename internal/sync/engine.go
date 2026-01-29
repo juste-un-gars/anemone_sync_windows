@@ -9,7 +9,6 @@ import (
 	"github.com/juste-un-gars/anemone_sync_windows/internal/config"
 	"github.com/juste-un-gars/anemone_sync_windows/internal/database"
 	"github.com/juste-un-gars/anemone_sync_windows/internal/scanner"
-	"github.com/juste-un-gars/anemone_sync_windows/internal/smb"
 	"go.uber.org/zap"
 )
 
@@ -132,6 +131,7 @@ func (e *Engine) Sync(ctx context.Context, req *SyncRequest) (*SyncResult, error
 		zap.String("status", string(result.Status)),
 		zap.Int("uploaded", result.FilesUploaded),
 		zap.Int("downloaded", result.FilesDownloaded),
+		zap.Int("placeholders", result.PlaceholdersCreated),
 		zap.Int("deleted", result.FilesDeleted),
 		zap.Int("errors", result.FilesError),
 		zap.Int("conflicts", result.ConflictsFound),
@@ -172,10 +172,10 @@ func (e *Engine) executeSync(ctx context.Context, req *SyncRequest, result *Sync
 
 	// Phase 3: Detection
 	e.reportProgress(req, &SyncProgress{
-		Phase:         "detecting",
-		Message:       "Detecting changes...",
-		Percentage:    25,
-		FilesTotal:    result.TotalFiles,
+		Phase:          "detecting",
+		Message:        "Detecting changes...",
+		Percentage:     25,
+		FilesTotal:     result.TotalFiles,
 		FilesProcessed: 0,
 	})
 
@@ -197,24 +197,71 @@ func (e *Engine) executeSync(ctx context.Context, req *SyncRequest, result *Sync
 	// Phase 4: Execution
 	if len(decisions) > 0 && !req.DryRun {
 		e.reportProgress(req, &SyncProgress{
-			Phase:         "executing",
-			Message:       "Executing sync actions...",
-			Percentage:    35,
-			FilesTotal:    len(decisions),
+			Phase:          "executing",
+			Message:        "Executing sync actions...",
+			Percentage:     35,
+			FilesTotal:     len(decisions),
 			FilesProcessed: 0,
 		})
 
-		actions, err := e.executeActions(ctx, req, decisions, smbClient, job)
-		if err != nil {
-			return fmt.Errorf("execution failed: %w", err)
+		// Separate downloads from other actions if Files On Demand is enabled
+		var downloadDecisions []*cache.SyncDecision
+		var otherDecisions []*cache.SyncDecision
+		if req.FilesOnDemand && req.PlaceholderCallback != nil {
+			for _, d := range decisions {
+				if d.Action == cache.ActionDownload {
+					downloadDecisions = append(downloadDecisions, d)
+				} else {
+					otherDecisions = append(otherDecisions, d)
+				}
+			}
+		} else {
+			otherDecisions = decisions
 		}
 
-		// Add actions to result
-		for _, action := range actions {
-			result.AddAction(action)
-			if action.Error != nil {
-				syncErr := NewSyncError(action.FilePath, string(action.Action), action.Error, 1)
-				result.AddError(syncErr)
+		// Create placeholders for downloads in Files On Demand mode
+		if len(downloadDecisions) > 0 {
+			e.logger.Info("creating placeholders instead of downloading (Files On Demand mode)",
+				zap.Int("count", len(downloadDecisions)),
+			)
+
+			// Convert to PlaceholderFileInfo
+			placeholderFiles := make([]PlaceholderFileInfo, len(downloadDecisions))
+			for i, d := range downloadDecisions {
+				placeholderFiles[i] = PlaceholderFileInfo{
+					RelativePath: d.LocalPath,
+					Size:         d.RemoteInfo.Size,
+					ModTime:      d.RemoteInfo.MTime.Unix(),
+				}
+			}
+
+			// Call placeholder callback
+			created, err := req.PlaceholderCallback(placeholderFiles)
+			if err != nil {
+				e.logger.Error("failed to create placeholders", zap.Error(err))
+				// Continue with other actions
+			} else {
+				result.PlaceholdersCreated = created
+				e.logger.Info("placeholders created",
+					zap.Int("count", created),
+				)
+			}
+		}
+
+		// Execute non-download actions (uploads, deletes)
+		if len(otherDecisions) > 0 {
+			actions, err := e.executeActions(ctx, req, otherDecisions, smbClient, job)
+			if err != nil {
+				return fmt.Errorf("execution failed: %w", err)
+			}
+
+			// Add actions to result
+			for _, action := range actions {
+				result.AddAction(action)
+				if action.Error != nil {
+					syncErr := NewSyncError(action.FilePath, string(action.Action), action.Error, 1)
+					result.AddError(syncErr)
+				}
 			}
 		}
 	} else if req.DryRun {
@@ -230,367 +277,9 @@ func (e *Engine) executeSync(ctx context.Context, req *SyncRequest, result *Sync
 		Percentage: 95,
 	})
 
-	if err := e.finalizeSync(ctx, req, result, job); err != nil {
+	if err := e.finalizeSync(ctx, req, result, job, localFiles, remoteFiles); err != nil {
 		e.logger.Error("finalization failed", zap.Error(err))
 		// Don't return error, sync already completed
-	}
-
-	return nil
-}
-
-// prepareSync handles Phase 1: Preparation
-func (e *Engine) prepareSync(ctx context.Context, req *SyncRequest) (*smb.SMBClient, *database.SyncJob, error) {
-	// Load job from database
-	job, err := e.db.GetSyncJob(req.JobID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to load job: %w", err)
-	}
-
-	if job == nil {
-		return nil, nil, fmt.Errorf("job %d not found", req.JobID)
-	}
-
-	// Parse server credential ID to get server and share
-	// Expected format: "server:share" (from SMB client credential manager)
-	server, share := parseCredentialID(job.ServerCredentialID)
-
-	// Create SMB client from keyring
-	smbClient, err := smb.NewSMBClientFromKeyring(server, share, e.logger.Named("smb"))
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create SMB client: %w", err)
-	}
-
-	// Connect to SMB server
-	if err := smbClient.Connect(); err != nil {
-		return nil, nil, fmt.Errorf("failed to connect to SMB server: %w", err)
-	}
-
-	// Update job status to syncing
-	if err := e.db.UpdateJobStatus(req.JobID, "syncing"); err != nil {
-		smbClient.Disconnect()
-		return nil, nil, fmt.Errorf("failed to update job status: %w", err)
-	}
-
-	e.logger.Info("preparation completed",
-		zap.String("server", server),
-		zap.String("share", share),
-	)
-
-	return smbClient, job, nil
-}
-
-// scanFiles handles Phase 2: Scanning
-func (e *Engine) scanFiles(ctx context.Context, req *SyncRequest, smbClient *smb.SMBClient) (
-	localFiles map[string]*cache.FileInfo,
-	remoteFiles map[string]*cache.FileInfo,
-	cachedFiles map[string]*cache.FileInfo,
-	err error,
-) {
-	// Scan local files
-	e.logger.Info("scanning local files", zap.String("path", req.LocalPath))
-	scanResult, err := e.scanner.Scan(ctx, scanner.ScanRequest{
-		JobID:      req.JobID,
-		BasePath:   req.LocalPath,
-		RemoteBase: req.RemotePath,
-	})
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("local scan failed: %w", err)
-	}
-
-	// Convert scan result to FileInfo map
-	localFiles = make(map[string]*cache.FileInfo)
-	for _, file := range scanResult.NewFiles {
-		localFiles[file.LocalPath] = &cache.FileInfo{
-			Path:  file.LocalPath,
-			Size:  file.Size,
-			MTime: file.MTime,
-			Hash:  file.Hash,
-		}
-	}
-	for _, file := range scanResult.ModifiedFiles {
-		localFiles[file.LocalPath] = &cache.FileInfo{
-			Path:  file.LocalPath,
-			Size:  file.Size,
-			MTime: file.MTime,
-			Hash:  file.Hash,
-		}
-	}
-	for _, file := range scanResult.UnchangedFiles {
-		localFiles[file.LocalPath] = &cache.FileInfo{
-			Path:  file.LocalPath,
-			Size:  file.Size,
-			MTime: file.MTime,
-			Hash:  file.Hash,
-		}
-	}
-
-	e.logger.Info("local scan completed",
-		zap.Int("files", len(localFiles)),
-	)
-
-	// Scan remote files (only if mode allows downloads)
-	if req.Mode.AllowsDownload() {
-		e.logger.Info("scanning remote files", zap.String("path", req.RemotePath))
-		remoteFiles, err = e.scanRemote(ctx, smbClient, req.RemotePath)
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("remote scan failed: %w", err)
-		}
-		e.logger.Info("remote scan completed",
-			zap.Int("files", len(remoteFiles)),
-		)
-	} else {
-		remoteFiles = make(map[string]*cache.FileInfo)
-	}
-
-	// Load cached state
-	cachedFiles, err = e.cache.GetAllCachedFiles(req.JobID)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to load cache: %w", err)
-	}
-
-	e.logger.Info("cache loaded",
-		zap.Int("files", len(cachedFiles)),
-	)
-
-	return localFiles, remoteFiles, cachedFiles, nil
-}
-
-// scanRemote scans remote files recursively using RemoteScanner
-func (e *Engine) scanRemote(ctx context.Context, smbClient *smb.SMBClient, basePath string) (map[string]*cache.FileInfo, error) {
-	// Create progress callback for remote scanning
-	progressCallback := func(progress RemoteScanProgress) {
-		e.logger.Debug("remote scan progress",
-			zap.Int("files", progress.FilesFound),
-			zap.Int("dirs", progress.DirsScanned),
-			zap.Int64("bytes", progress.BytesDiscovered),
-			zap.String("current_dir", progress.CurrentDir),
-		)
-	}
-
-	// Create remote scanner
-	scanner := NewRemoteScanner(smbClient, e.logger.Named("remote_scanner"), progressCallback)
-
-	// Perform scan
-	result, err := scanner.Scan(ctx, basePath)
-	if err != nil {
-		return nil, fmt.Errorf("remote scan failed: %w", err)
-	}
-
-	// Log scan results
-	e.logger.Info("remote scan completed",
-		zap.Int("files", result.TotalFiles),
-		zap.Int("dirs", result.TotalDirs),
-		zap.Int64("bytes", result.TotalBytes),
-		zap.Duration("duration", result.Duration),
-		zap.Int("errors", len(result.Errors)),
-		zap.Bool("partial_success", result.PartialSuccess),
-	)
-
-	// Warn about any errors encountered
-	if len(result.Errors) > 0 {
-		e.logger.Warn("remote scan encountered errors",
-			zap.Int("error_count", len(result.Errors)),
-		)
-		for i, scanErr := range result.Errors {
-			if i < 5 { // Log first 5 errors
-				e.logger.Warn("remote scan error", zap.Error(scanErr))
-			}
-		}
-		if len(result.Errors) > 5 {
-			e.logger.Warn("additional errors omitted", zap.Int("count", len(result.Errors)-5))
-		}
-	}
-
-	return result.Files, nil
-}
-
-// detectChanges handles Phase 3: Detection
-func (e *Engine) detectChanges(ctx context.Context, req *SyncRequest,
-	localFiles, remoteFiles, cachedFiles map[string]*cache.FileInfo) (
-	decisions []*cache.SyncDecision,
-	conflicts []*cache.SyncDecision,
-	err error,
-) {
-	// Use change detector for 3-way merge
-	allDecisions, err := e.detector.BatchDetermineSyncActions(req.JobID, localFiles, remoteFiles)
-	if err != nil {
-		return nil, nil, fmt.Errorf("change detection failed: %w", err)
-	}
-
-	// Separate conflicts from executable decisions
-	initialConflicts := make([]*cache.SyncDecision, 0)
-	decisions = make([]*cache.SyncDecision, 0)
-
-	for _, decision := range allDecisions {
-		if decision.NeedsResolution {
-			initialConflicts = append(initialConflicts, decision)
-		} else {
-			decisions = append(decisions, decision)
-		}
-	}
-
-	e.logger.Info("initial change detection completed",
-		zap.Int("total_decisions", len(allDecisions)),
-		zap.Int("executable", len(decisions)),
-		zap.Int("conflicts", len(initialConflicts)),
-	)
-
-	// Resolve conflicts if there are any and a resolution policy is set
-	if len(initialConflicts) > 0 && req.ConflictResolution != "" {
-		resolver, err := NewConflictResolver(req.ConflictResolution, e.logger.Named("conflict_resolver"))
-		if err != nil {
-			e.logger.Warn("failed to create conflict resolver",
-				zap.Error(err),
-				zap.String("policy", req.ConflictResolution),
-			)
-			conflicts = initialConflicts
-		} else {
-			// Attempt to resolve conflicts
-			resolved, unresolved := resolver.ResolveConflicts(initialConflicts)
-
-			// Add resolved conflicts to decisions
-			decisions = append(decisions, resolved...)
-			conflicts = unresolved
-
-			e.logger.Info("conflict resolution applied",
-				zap.Int("initial_conflicts", len(initialConflicts)),
-				zap.Int("resolved", len(resolved)),
-				zap.Int("unresolved", len(unresolved)),
-				zap.String("policy", req.ConflictResolution),
-			)
-		}
-	} else {
-		conflicts = initialConflicts
-	}
-
-	// Filter decisions based on sync mode
-	decisions = e.filterDecisionsByMode(req.Mode, decisions)
-
-	e.logger.Info("change detection completed",
-		zap.Int("total_decisions", len(allDecisions)),
-		zap.Int("executable", len(decisions)),
-		zap.Int("final_conflicts", len(conflicts)),
-	)
-
-	return decisions, conflicts, nil
-}
-
-// filterDecisionsByMode filters decisions based on sync mode
-func (e *Engine) filterDecisionsByMode(mode SyncMode, decisions []*cache.SyncDecision) []*cache.SyncDecision {
-	filtered := make([]*cache.SyncDecision, 0, len(decisions))
-
-	for _, decision := range decisions {
-		include := false
-
-		switch decision.Action {
-		case cache.ActionUpload:
-			include = mode.AllowsUpload()
-		case cache.ActionDownload:
-			include = mode.AllowsDownload()
-		case cache.ActionDeleteLocal:
-			include = mode.AllowsDownload() // Only delete local if we can sync from remote
-		case cache.ActionDeleteRemote:
-			include = mode.AllowsUpload() // Only delete remote if we can sync to remote
-		default:
-			include = false
-		}
-
-		if include {
-			filtered = append(filtered, decision)
-		}
-	}
-
-	return filtered
-}
-
-// executeActions handles Phase 4: Execution
-func (e *Engine) executeActions(ctx context.Context, req *SyncRequest,
-	decisions []*cache.SyncDecision, smbClient *smb.SMBClient, job *database.SyncJob) ([]*SyncAction, error) {
-
-	// Create progress callback
-	progressFn := func(progress *SyncProgress) {
-		e.reportProgress(req, progress)
-	}
-
-	// Execute using executor
-	actions, err := e.executor.Execute(ctx, decisions, smbClient, progressFn)
-	if err != nil {
-		return nil, fmt.Errorf("execution failed: %w", err)
-	}
-
-	return actions, nil
-}
-
-// finalizeSync handles Phase 5: Finalization
-func (e *Engine) finalizeSync(ctx context.Context, req *SyncRequest, result *SyncResult, job *database.SyncJob) error {
-	// Update cache for successful actions
-	if !req.DryRun {
-		if err := e.updateCacheFromActions(req.JobID, result.Actions); err != nil {
-			return fmt.Errorf("failed to update cache: %w", err)
-		}
-	}
-
-	// Record sync history
-	history := &database.SyncHistory{
-		JobID:            req.JobID,
-		Timestamp:        result.StartTime,
-		FilesSynced:      result.FilesUploaded + result.FilesDownloaded,
-		FilesFailed:      result.FilesError,
-		BytesTransferred: result.BytesTransferred,
-		Duration:         int(result.Duration.Seconds()),
-		Status:           string(result.Status),
-		ErrorSummary:     formatErrorSummary(result.Errors),
-	}
-
-	if err := e.db.InsertSyncHistory(history); err != nil {
-		return fmt.Errorf("failed to insert sync history: %w", err)
-	}
-
-	// Update job status
-	var finalStatus string
-	switch result.Status {
-	case SyncStatusSuccess:
-		finalStatus = "idle"
-	case SyncStatusPartial:
-		finalStatus = "idle" // Still idle but with some errors
-	case SyncStatusFailed:
-		finalStatus = "error"
-	}
-
-	if err := e.db.UpdateJobStatus(req.JobID, finalStatus); err != nil {
-		return fmt.Errorf("failed to update job status: %w", err)
-	}
-
-	// Update job last run time
-	if err := e.db.UpdateJobLastRun(req.JobID, result.EndTime); err != nil {
-		return fmt.Errorf("failed to update job last run: %w", err)
-	}
-
-	e.logger.Info("finalization completed")
-	return nil
-}
-
-// updateCacheFromActions updates cache based on successful actions
-func (e *Engine) updateCacheFromActions(jobID int64, actions []*SyncAction) error {
-	updates := make(map[string]*cache.FileInfo)
-	remotePaths := make(map[string]string)
-
-	for _, action := range actions {
-		if action.Status != ActionStatusSuccess {
-			continue
-		}
-
-		updates[action.FilePath] = &cache.FileInfo{
-			Path:  action.FilePath,
-			Size:  action.Size,
-			MTime: timeNow(), // Current time after sync
-			Hash:  "",        // Hash will be computed on next scan if needed
-		}
-		remotePaths[action.FilePath] = action.RemotePath
-	}
-
-	if len(updates) > 0 {
-		return e.cache.UpdateCacheBatch(jobID, updates, remotePaths)
 	}
 
 	return nil
@@ -642,44 +331,4 @@ func (e *Engine) Close() error {
 
 	e.closed = true
 	return nil
-}
-
-// Helper functions
-
-// parseCredentialID parses server and share from credential ID
-// Expected format: "server:share"
-func parseCredentialID(credID string) (server, share string) {
-	for i := 0; i < len(credID); i++ {
-		if credID[i] == ':' {
-			return credID[:i], credID[i+1:]
-		}
-	}
-	return credID, ""
-}
-
-// formatErrorSummary creates a summary string from errors
-func formatErrorSummary(errors []*SyncError) string {
-	if len(errors) == 0 {
-		return ""
-	}
-
-	summary := fmt.Sprintf("%d error(s): ", len(errors))
-	if len(errors) <= 3 {
-		for i, err := range errors {
-			if i > 0 {
-				summary += "; "
-			}
-			summary += fmt.Sprintf("%s (%s)", err.FilePath, err.Operation)
-		}
-	} else {
-		for i := 0; i < 3; i++ {
-			if i > 0 {
-				summary += "; "
-			}
-			summary += fmt.Sprintf("%s (%s)", errors[i].FilePath, errors[i].Operation)
-		}
-		summary += fmt.Sprintf("; and %d more", len(errors)-3)
-	}
-
-	return summary
 }

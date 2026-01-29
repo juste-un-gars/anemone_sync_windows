@@ -49,6 +49,13 @@ var (
 	procCfSetInSyncState         = cldapi.NewProc("CfSetInSyncState")
 	procCfSetPinState            = cldapi.NewProc("CfSetPinState")
 	procCfGetPlatformInfo        = cldapi.NewProc("CfGetPlatformInfo")
+
+	// File handle with oplock (for safe dehydration)
+	procCfOpenFileWithOplock              = cldapi.NewProc("CfOpenFileWithOplock")
+	procCfCloseHandle                     = cldapi.NewProc("CfCloseHandle")
+	procCfGetWin32HandleFromProtectedHandle = cldapi.NewProc("CfGetWin32HandleFromProtectedHandle")
+	procCfReferenceProtectedHandle        = cldapi.NewProc("CfReferenceProtectedHandle")
+	procCfReleaseProtectedHandle          = cldapi.NewProc("CfReleaseProtectedHandle")
 )
 
 // HRESULT error codes

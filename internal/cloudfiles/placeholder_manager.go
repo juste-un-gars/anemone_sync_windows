@@ -275,14 +275,14 @@ func (pm *PlaceholderManager) createFilePlaceholders(parentDir string, files []R
 			FileIdentity:       fileIdentityPtr,
 			FileIdentityLength: fileIdentityLen,
 			FsMetadata: CF_FS_METADATA{
-				FileSize: f.Size,
 				BasicInfo: FILE_BASIC_INFO{
-					LastWriteTime:  timeToFiletime(f.ModTime),
 					CreationTime:   timeToFiletime(f.ModTime),
 					LastAccessTime: timeToFiletime(f.ModTime),
+					LastWriteTime:  timeToFiletime(f.ModTime),
 					ChangeTime:     timeToFiletime(f.ModTime),
 					FileAttributes: windows.FILE_ATTRIBUTE_NORMAL,
 				},
+				FileSize: f.Size,
 			},
 			Flags: CF_PLACEHOLDER_CREATE_FLAG_MARK_IN_SYNC,
 		}

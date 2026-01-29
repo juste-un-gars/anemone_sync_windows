@@ -8,8 +8,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -89,15 +87,10 @@ type dataSourceAdapter struct {
 }
 
 func (a *dataSourceAdapter) GetFileReader(ctx context.Context, relativePath string, offset int64) (io.ReadCloser, error) {
-	// Convert relative path to remote path
-	remotePath := relativePath
-	if a.remotePath != "" {
-		remotePath = filepath.Join(a.remotePath, relativePath)
-	}
-	// Normalize to forward slashes for SMB
-	remotePath = strings.ReplaceAll(remotePath, "\\", "/")
-
-	return a.source.GetFileReader(ctx, remotePath, offset)
+	// Pass relative path directly to source
+	// The underlying SMBClientAdapter already handles adding the sharePath prefix
+	// Adding remotePath here would cause double-prefixing (e.g., test_anemone/test_anemone/file.jpg)
+	return a.source.GetFileReader(ctx, relativePath, offset)
 }
 
 // SMBDataSource implements DataSource for SMB shares.

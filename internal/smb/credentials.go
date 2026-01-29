@@ -16,7 +16,6 @@ const (
 // Credentials represents SMB connection credentials
 type Credentials struct {
 	Server   string `json:"server"`
-	Share    string `json:"share"`
 	Port     int    `json:"port"`
 	Username string `json:"username"`
 	Password string `json:"password"`
@@ -38,13 +37,8 @@ func NewCredentialManager(logger *zap.Logger) *CredentialManager {
 	}
 }
 
-// makeKey creates a unique key for the credentials based on server and share
-func makeKey(server, share string) string {
-	return fmt.Sprintf("%s:%s", server, share)
-}
-
 // Save stores credentials securely in the system keyring
-// The credentials are stored as JSON under a key derived from server:share
+// The credentials are stored as JSON under the server hostname as key
 func (cm *CredentialManager) Save(creds *Credentials) error {
 	if creds == nil {
 		return fmt.Errorf("credentials cannot be nil")
@@ -52,14 +46,9 @@ func (cm *CredentialManager) Save(creds *Credentials) error {
 	if creds.Server == "" {
 		return fmt.Errorf("server cannot be empty")
 	}
-	if creds.Share == "" {
-		return fmt.Errorf("share cannot be empty")
-	}
 	if creds.Username == "" {
 		return fmt.Errorf("username cannot be empty")
 	}
-
-	key := makeKey(creds.Server, creds.Share)
 
 	// Marshal credentials to JSON
 	data, err := json.Marshal(creds)
@@ -67,31 +56,25 @@ func (cm *CredentialManager) Save(creds *Credentials) error {
 		return fmt.Errorf("failed to marshal credentials: %w", err)
 	}
 
-	// Store in keyring
-	if err := keyring.Set(ServiceName, key, string(data)); err != nil {
+	// Store in keyring using server as key
+	if err := keyring.Set(ServiceName, creds.Server, string(data)); err != nil {
 		return fmt.Errorf("failed to store credentials in keyring: %w", err)
 	}
 
 	cm.logger.Info("credentials saved to keyring",
-		zap.String("server", creds.Server),
-		zap.String("share", creds.Share))
+		zap.String("server", creds.Server))
 
 	return nil
 }
 
 // Load retrieves credentials from the system keyring
-func (cm *CredentialManager) Load(server, share string) (*Credentials, error) {
+func (cm *CredentialManager) Load(server string) (*Credentials, error) {
 	if server == "" {
 		return nil, fmt.Errorf("server cannot be empty")
 	}
-	if share == "" {
-		return nil, fmt.Errorf("share cannot be empty")
-	}
 
-	key := makeKey(server, share)
-
-	// Get from keyring
-	data, err := keyring.Get(ServiceName, key)
+	// Get from keyring using server as key
+	data, err := keyring.Get(ServiceName, server)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load credentials from keyring: %w", err)
 	}
@@ -103,44 +86,35 @@ func (cm *CredentialManager) Load(server, share string) (*Credentials, error) {
 	}
 
 	cm.logger.Info("credentials loaded from keyring",
-		zap.String("server", server),
-		zap.String("share", share))
+		zap.String("server", server))
 
 	return &creds, nil
 }
 
 // Delete removes credentials from the system keyring
-func (cm *CredentialManager) Delete(server, share string) error {
+func (cm *CredentialManager) Delete(server string) error {
 	if server == "" {
 		return fmt.Errorf("server cannot be empty")
 	}
-	if share == "" {
-		return fmt.Errorf("share cannot be empty")
-	}
-
-	key := makeKey(server, share)
 
 	// Delete from keyring
-	if err := keyring.Delete(ServiceName, key); err != nil {
+	if err := keyring.Delete(ServiceName, server); err != nil {
 		return fmt.Errorf("failed to delete credentials from keyring: %w", err)
 	}
 
 	cm.logger.Info("credentials deleted from keyring",
-		zap.String("server", server),
-		zap.String("share", share))
+		zap.String("server", server))
 
 	return nil
 }
 
-// Exists checks if credentials exist in the keyring for the given server and share
-func (cm *CredentialManager) Exists(server, share string) bool {
-	if server == "" || share == "" {
+// Exists checks if credentials exist in the keyring for the given server
+func (cm *CredentialManager) Exists(server string) bool {
+	if server == "" {
 		return false
 	}
 
-	key := makeKey(server, share)
-
 	// Try to get from keyring
-	_, err := keyring.Get(ServiceName, key)
+	_, err := keyring.Get(ServiceName, server)
 	return err == nil
 }
