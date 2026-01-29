@@ -144,8 +144,10 @@ type CF_SYNC_POLICIES struct {
 func NewDefaultSyncPolicies() *CF_SYNC_POLICIES {
 	policies := &CF_SYNC_POLICIES{
 		Hydration: CF_HYDRATION_POLICY{
-			Primary:  CF_HYDRATION_POLICY_FULL,
-			Modifier: CF_HYDRATION_POLICY_MODIFIER_AUTO_DEHYDRATION_ALLOWED,
+			Primary: CF_HYDRATION_POLICY_FULL,
+			// VALIDATION_REQUIRED: Forces Windows to generate a RequestKey for async operations
+			// AUTO_DEHYDRATION_ALLOWED: Allows files to be dehydrated when disk space is low
+			Modifier: CF_HYDRATION_POLICY_MODIFIER_VALIDATION_REQUIRED | CF_HYDRATION_POLICY_MODIFIER_AUTO_DEHYDRATION_ALLOWED,
 		},
 		Population: CF_POPULATION_POLICY{
 			// Use ALWAYS_FULL - provider pre-populates all placeholders at startup
@@ -302,6 +304,16 @@ const (
 	CF_PLACEHOLDER_STATE_INVALID           CF_PLACEHOLDER_STATE = 0xFFFFFFFF
 )
 
+// --- In-Sync State ---
+
+// CF_IN_SYNC_STATE represents the in-sync state of a placeholder.
+type CF_IN_SYNC_STATE uint32
+
+const (
+	CF_IN_SYNC_STATE_NOT_IN_SYNC CF_IN_SYNC_STATE = 0
+	CF_IN_SYNC_STATE_IN_SYNC     CF_IN_SYNC_STATE = 1
+)
+
 // --- Placeholder Create Info ---
 
 // CF_PLACEHOLDER_CREATE_INFO contains information for creating a placeholder.
@@ -316,9 +328,10 @@ type CF_PLACEHOLDER_CREATE_INFO struct {
 }
 
 // CF_FS_METADATA contains file system metadata for a placeholder.
+// IMPORTANT: Field order must match Windows cfapi.h - BasicInfo first, then FileSize.
 type CF_FS_METADATA struct {
-	FileSize         int64
-	BasicInfo        FILE_BASIC_INFO
+	BasicInfo FILE_BASIC_INFO
+	FileSize  int64
 }
 
 // FILE_BASIC_INFO contains basic file information.
@@ -379,11 +392,13 @@ type CF_OPERATION_PARAMETERS struct {
 }
 
 // CF_OPERATION_TRANSFER_DATA_PARAMS for TRANSFER_DATA operation.
+// IMPORTANT: Field alignment must match Windows x64 ABI.
 type CF_OPERATION_TRANSFER_DATA_PARAMS struct {
-	ParamSize      uint32
-	Flags          uint32
+	ParamSize        uint32
+	Flags            uint32
 	CompletionStatus int32
-	Buffer         unsafe.Pointer
-	Offset         int64
-	Length         int64
+	_                uint32         // padding for 8-byte alignment of Buffer
+	Buffer           unsafe.Pointer
+	Offset           int64
+	Length           int64
 }

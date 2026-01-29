@@ -146,32 +146,67 @@ func (dm *DehydrationManager) DehydrateFile(ctx context.Context, relativePath st
 		zap.String("path", relativePath),
 	)
 
-	// Open the file
-	handle, err := windows.CreateFile(
-		windows.StringToUTF16Ptr(fullPath),
-		windows.GENERIC_WRITE,
-		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
-		nil,
-		windows.OPEN_EXISTING,
-		windows.FILE_FLAG_BACKUP_SEMANTICS,
-		0,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to open file: %w", err)
-	}
-	defer windows.CloseHandle(handle)
+	fmt.Printf("[DEBUG Dehydrate] File: %s\n", fullPath)
 
-	// Get file size
+	// First, get the file size using regular file operations
+	fi, err := os.Stat(fullPath)
+	if err != nil {
+		return fmt.Errorf("failed to stat file: %w", err)
+	}
+	fileSize := fi.Size()
+
+	// Open the file with CfOpenFileWithOplock for exclusive access (required for dehydration)
+	// Use EXCLUSIVE + WRITE_ACCESS flags for safe dehydration
+	protectedHandle, err := OpenFileWithOplock(fullPath, CF_OPEN_FILE_FLAG_EXCLUSIVE|CF_OPEN_FILE_FLAG_WRITE_ACCESS)
+	if err != nil {
+		return fmt.Errorf("failed to open file with oplock: %w", err)
+	}
+	defer CloseHandle(protectedHandle)
+
+	// Get Win32 handle from protected handle (required for Win32 API calls)
+	win32Handle, err := GetWin32HandleFromProtectedHandle(protectedHandle)
+	if err != nil {
+		return fmt.Errorf("failed to get Win32 handle: %w", err)
+	}
+	fmt.Printf("[DEBUG Dehydrate] protectedHandle=%v, win32Handle=%v\n", protectedHandle, win32Handle)
+
+	// Check placeholder state before dehydration using GetFileInformationByHandle
 	var fileInfo windows.ByHandleFileInformation
-	if err := windows.GetFileInformationByHandle(handle, &fileInfo); err != nil {
+	if err := windows.GetFileInformationByHandle(win32Handle, &fileInfo); err != nil {
 		return fmt.Errorf("failed to get file info: %w", err)
 	}
 
-	fileSize := int64(fileInfo.FileSizeHigh)<<32 | int64(fileInfo.FileSizeLow)
+	stateBefore := GetPlaceholderState(fileInfo.FileAttributes, IO_REPARSE_TAG_CLOUD)
+	fmt.Printf("[DEBUG Dehydrate] Before: attrs=0x%08X, state=0x%08X, size=%d\n",
+		fileInfo.FileAttributes, stateBefore, fileSize)
 
-	// Dehydrate the file
-	if err := DehydratePlaceholder(handle, 0, fileSize, 0); err != nil {
+	// Check if file is already a placeholder
+	isPlaceholder := stateBefore&CF_PLACEHOLDER_STATE_PLACEHOLDER != 0
+	isPartial := stateBefore&CF_PLACEHOLDER_STATE_PARTIAL != 0
+	fmt.Printf("[DEBUG Dehydrate] isPlaceholder=%v, isPartial=%v (partial=already dehydrated)\n",
+		isPlaceholder, isPartial)
+
+	if !isPlaceholder {
+		return fmt.Errorf("file is not a placeholder")
+	}
+	if isPartial {
+		dm.logger.Info("file already dehydrated (partial)",
+			zap.String("path", relativePath),
+		)
+		return nil // Already dehydrated
+	}
+
+	// Dehydrate the file using the PROTECTED handle (not Win32 handle!)
+	// CfDehydratePlaceholder requires the protected handle from CfOpenFileWithOplock
+	if err := DehydratePlaceholder(protectedHandle, 0, fileSize, 0); err != nil {
 		return fmt.Errorf("failed to dehydrate: %w", err)
+	}
+
+	// Check state after dehydration
+	if err := windows.GetFileInformationByHandle(win32Handle, &fileInfo); err == nil {
+		stateAfter := GetPlaceholderState(fileInfo.FileAttributes, IO_REPARSE_TAG_CLOUD)
+		fmt.Printf("[DEBUG Dehydrate] After: attrs=0x%08X, state=0x%08X\n",
+			fileInfo.FileAttributes, stateAfter)
 	}
 
 	dm.logger.Info("file dehydrated",

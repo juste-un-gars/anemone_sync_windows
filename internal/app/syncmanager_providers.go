@@ -120,7 +120,54 @@ func (m *SyncManager) getOrCreateProvider(job *SyncJob) (*cloudfiles.CloudFilesP
 	// Store provider
 	m.providers[job.ID] = provider
 
+	// IMPORTANT: Populate placeholders immediately so the folder is browsable.
+	// Without this, Windows can't display the folder contents.
+	go m.populatePlaceholdersAsync(provider, job)
+
 	return provider, nil
+}
+
+// populatePlaceholdersAsync populates placeholders in the background.
+// This is called after provider initialization to make the folder browsable.
+func (m *SyncManager) populatePlaceholdersAsync(provider *cloudfiles.CloudFilesProvider, job *SyncJob) {
+	m.logger.Info("Populating placeholders for Cloud Files provider",
+		zap.String("job", job.Name),
+		zap.String("local_path", job.LocalPath),
+	)
+
+	// Try to list files from SMB and create placeholders
+	dataSource, err := m.createSMBDataSource(job)
+	if err != nil {
+		m.logger.Error("Failed to create SMB data source for placeholder population",
+			zap.Error(err),
+		)
+		return
+	}
+
+	// List files from remote
+	remoteFiles, err := dataSource.ListFiles(m.ctx)
+	if err != nil {
+		m.logger.Error("Failed to list remote files for placeholder population",
+			zap.Error(err),
+		)
+		return
+	}
+
+	m.logger.Info("Creating placeholders from remote file list",
+		zap.Int("file_count", len(remoteFiles)),
+	)
+
+	// Create placeholders
+	if err := provider.SyncPlaceholders(m.ctx, remoteFiles); err != nil {
+		m.logger.Error("Failed to create placeholders",
+			zap.Error(err),
+		)
+		return
+	}
+
+	m.logger.Info("Placeholders created successfully",
+		zap.Int("count", len(remoteFiles)),
+	)
 }
 
 // createSMBDataSource creates an SMB data source for hydration.
@@ -251,4 +298,11 @@ func (m *SyncManager) closeAllProviders() {
 		provider.Close()
 	}
 	m.providers = make(map[int64]*cloudfiles.CloudFilesProvider)
+}
+
+// GetProvider returns the Cloud Files provider for a job, or nil if not found.
+func (m *SyncManager) GetProvider(jobID int64) *cloudfiles.CloudFilesProvider {
+	m.providersMu.RLock()
+	defer m.providersMu.RUnlock()
+	return m.providers[jobID]
 }

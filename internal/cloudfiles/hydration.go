@@ -170,8 +170,11 @@ func (h *HydrationHandler) HandleFetchData(ctx context.Context, info *FetchDataI
 			break
 		}
 
-		// Transfer to Windows
-		if err := TransferData(info.ConnectionKey, info.TransferKey, buffer[:n], offset); err != nil {
+		// Check if this is the last chunk
+		isLastChunk := (remaining - int64(n)) <= 0
+
+		// Transfer to Windows (mark in-sync on last chunk)
+		if err := TransferData(info.ConnectionKey, info.TransferKey, info.RequestKey, buffer[:n], offset, isLastChunk); err != nil {
 			h.logger.Error("failed to transfer data",
 				zap.String("file", relativePath),
 				zap.Error(err),
@@ -198,6 +201,51 @@ func (h *HydrationHandler) HandleFetchData(ctx context.Context, info *FetchDataI
 		zap.String("file", relativePath),
 		zap.Int64("bytes", transferred),
 	)
+
+	// Mark file as IN_SYNC after successful hydration
+	// This is REQUIRED for dehydration to work later
+	// IMPORTANT: Must use CfOpenFileWithOplock, not windows.CreateFile!
+	// CfSetInSyncState requires a handle from CfOpenFileWithOplock.
+	fullPath := filepath.Join(h.syncRoot.Path(), relativePath)
+	if protectedHandle, err := OpenFileWithOplock(fullPath, CF_OPEN_FILE_FLAG_WRITE_ACCESS); err == nil {
+		defer CloseHandle(protectedHandle)
+
+		// Get Win32 handle to check state before/after
+		if win32Handle, err := GetWin32HandleFromProtectedHandle(protectedHandle); err == nil {
+			var fileInfo windows.ByHandleFileInformation
+			if err := windows.GetFileInformationByHandle(win32Handle, &fileInfo); err == nil {
+				stateBefore := GetPlaceholderState(fileInfo.FileAttributes, IO_REPARSE_TAG_CLOUD)
+				fmt.Printf("[DEBUG SetInSync] BEFORE: attrs=0x%08X, state=0x%08X, IN_SYNC=%v\n",
+					fileInfo.FileAttributes, stateBefore, stateBefore&CF_PLACEHOLDER_STATE_IN_SYNC != 0)
+			}
+		}
+
+		if err := SetInSyncState(protectedHandle, uint32(CF_IN_SYNC_STATE_IN_SYNC), nil); err != nil {
+			h.logger.Warn("failed to set in-sync state after hydration",
+				zap.String("file", relativePath),
+				zap.Error(err),
+			)
+		} else {
+			h.logger.Debug("marked file as in-sync after hydration",
+				zap.String("file", relativePath),
+			)
+		}
+
+		// Check state after
+		if win32Handle, err := GetWin32HandleFromProtectedHandle(protectedHandle); err == nil {
+			var fileInfo windows.ByHandleFileInformation
+			if err := windows.GetFileInformationByHandle(win32Handle, &fileInfo); err == nil {
+				stateAfter := GetPlaceholderState(fileInfo.FileAttributes, IO_REPARSE_TAG_CLOUD)
+				fmt.Printf("[DEBUG SetInSync] AFTER: attrs=0x%08X, state=0x%08X, IN_SYNC=%v\n",
+					fileInfo.FileAttributes, stateAfter, stateAfter&CF_PLACEHOLDER_STATE_IN_SYNC != 0)
+			}
+		}
+	} else {
+		h.logger.Warn("failed to open file for in-sync marking",
+			zap.String("file", relativePath),
+			zap.Error(err),
+		)
+	}
 
 	return nil
 }

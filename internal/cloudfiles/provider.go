@@ -108,10 +108,19 @@ func (p *CloudFilesProvider) SetDataSource(source DataSource) {
 		adapter := &dataSourceAdapter{source: source, remotePath: p.remotePath}
 		p.hydration = NewHydrationHandler(p.syncRoot, adapter, p.logger)
 
+		// IMPORTANT: Set up global data provider for CGO callbacks
+		// The new architecture calls Go directly from C, so we need a global provider
+		SetGlobalDataProvider(adapter, p.localPath, p.logger)
+
 		// If already initialized with bridge, update the callback
+		// Note: With the new architecture, the bridge doesn't use this callback anymore,
+		// but we keep it for backwards compatibility and legacy mode
 		if p.initialized && p.syncRoot.IsUsingBridge() {
 			p.syncRoot.SetFetchDataCallback(p.hydration.handleFetchDataCallback)
 		}
+	} else {
+		// Clear global provider if source is nil
+		ClearGlobalDataProvider()
 	}
 }
 
@@ -243,6 +252,9 @@ func (p *CloudFilesProvider) Close() error {
 	}
 
 	p.logger.Info("closing cloud files provider")
+
+	// Clear global data provider (used by CGO callbacks)
+	ClearGlobalDataProvider()
 
 	// Cancel bridge context if using CGO bridge
 	if p.cancel != nil {
@@ -399,5 +411,16 @@ func (p *CloudFilesProvider) GetDehydrationStats() DehydrationStats {
 		return DehydrationStats{}
 	}
 	return dehydration.GetStats()
+}
+
+// GetDehydrationManager returns the dehydration manager, creating it if needed.
+func (p *CloudFilesProvider) GetDehydrationManager() *DehydrationManager {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.dehydration == nil {
+		p.dehydration = NewDehydrationManager(p.syncRoot, DefaultDehydrationPolicy(), p.logger)
+	}
+	return p.dehydration
 }
 

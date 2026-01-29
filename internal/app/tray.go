@@ -20,6 +20,7 @@ type Tray struct {
 	stopSyncItem        *fyne.MenuItem
 	syncShutdownMenu    *fyne.MenuItem
 	cancelShutdownItem  *fyne.MenuItem
+	freeSpaceMenu       *fyne.MenuItem
 }
 
 // NewTray creates a new Tray instance.
@@ -66,6 +67,9 @@ func (t *Tray) Setup() {
 	})
 	t.cancelShutdownItem.Disabled = true // Initially disabled
 
+	// Free Up Space submenu
+	t.freeSpaceMenu = t.buildFreeSpaceMenu()
+
 	settingsItem := fyne.NewMenuItem("Settings...", func() {
 		t.app.Logger().Info("Settings clicked")
 		t.app.ShowSettings()
@@ -85,6 +89,8 @@ func (t *Tray) Setup() {
 		fyne.NewMenuItemSeparator(),
 		t.syncShutdownMenu,
 		t.cancelShutdownItem,
+		fyne.NewMenuItemSeparator(),
+		t.freeSpaceMenu,
 		fyne.NewMenuItemSeparator(),
 		settingsItem,
 		fyne.NewMenuItemSeparator(),
@@ -221,4 +227,60 @@ func (t *Tray) UpdateShutdownState(active bool) {
 	if t.menu != nil {
 		t.menu.Refresh()
 	}
+}
+
+// buildFreeSpaceMenu creates the "Free Up Space" submenu.
+func (t *Tray) buildFreeSpaceMenu() *fyne.MenuItem {
+	menuItems := []*fyne.MenuItem{}
+
+	// Add jobs with Files On Demand enabled
+	jobs := t.app.GetSyncJobs()
+	hasFilesOnDemand := false
+
+	for _, job := range jobs {
+		if job.FilesOnDemand && job.Enabled {
+			hasFilesOnDemand = true
+			j := job // capture for closure
+			item := fyne.NewMenuItem(j.Name+"...", func() {
+				t.app.Logger().Info("Free Up Space clicked for " + j.Name)
+				t.app.ShowDehydrateDialog(j)
+			})
+			menuItems = append(menuItems, item)
+		}
+	}
+
+	// Create the parent menu item
+	freeSpaceItem := fyne.NewMenuItem("Free Up Space", nil)
+
+	if hasFilesOnDemand {
+		freeSpaceItem.ChildMenu = fyne.NewMenu("", menuItems...)
+	} else {
+		// No jobs with Files On Demand - disable the menu
+		freeSpaceItem.Disabled = true
+	}
+
+	return freeSpaceItem
+}
+
+// RefreshFreeSpaceMenu rebuilds the Free Up Space submenu with current jobs.
+func (t *Tray) RefreshFreeSpaceMenu() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if !t.ready || t.menu == nil {
+		return
+	}
+
+	// Rebuild the submenu
+	t.freeSpaceMenu = t.buildFreeSpaceMenu()
+
+	// Find and replace the menu item
+	for i, item := range t.menu.Items {
+		if item.Label == "Free Up Space" {
+			t.menu.Items[i] = t.freeSpaceMenu
+			break
+		}
+	}
+
+	t.menu.Refresh()
 }
