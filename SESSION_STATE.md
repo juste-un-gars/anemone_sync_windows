@@ -319,6 +319,53 @@ After:  state=0x00000031 (PLACEHOLDER + PARTIAL + SYNC_ROOT)
 
 ## Prochaines etapes
 
+### Session 065 - Tests automatises Cloud Files
+
+**Objectif:** Creer un outil CLI de test automatise pour valider hydratation/dehydratation
+
+**Environnement de test:**
+- Local sync root: `D:\test_anemone\_test\` (sous-dossier dedie)
+- Remote: `\\192.168.83.221\data_franck\test_anemone\_test\`
+- Fichiers sources: `D:\temp\` (variete de fichiers disponibles)
+
+**Fichiers sources disponibles dans D:\temp:**
+- Petits: bbox ipv6.txt (190B), dhcp.txt (955B)
+- Moyens: .docx (18-487KB), .xlsx (9-25KB)
+- Gros: Ferdium exe (345MB), linuxmint ISO (3GB)
+- Structure: 1/A/B/*.docx (3 niveaux imbriques)
+
+**Outil a creer:** `cmd/cloudfiles_test/`
+```
+main.go       - CLI (--list, --run-all, --run T1,T2)
+config.go     - Chemins, credentials SMB
+scenarios.go  - Definition des scenarios
+runner.go     - Execution des tests
+helpers.go    - Copie fichiers, verif etats
+report.go     - Affichage PASS/FAIL
+```
+
+**Scenarios a implementer:**
+| ID | Scenario | Description |
+|----|----------|-------------|
+| T1 | Hydratation basique | Fichier distant -> placeholder -> lire -> hydrate |
+| T2 | Dehydratation basique | Fichier hydrate -> DehydrateFile() -> PARTIAL |
+| T3 | Cycle complet | Hydrate -> Modify -> Sync -> Dehydrate |
+| T4 | Upload local | Creer fichier local -> Sync -> Upload serveur |
+| T5 | Structure imbriquee | Dossier 1/A/B/ avec sous-fichiers |
+| T6 | Gros fichier | 345MB exe, verifier progress |
+| T7 | Modif serveur | Modifier fichier distant -> Sync -> MAJ placeholder |
+| T8 | Suppression serveur | Supprimer distant -> Sync -> Suppression locale |
+
+**Options:**
+- `--list` : Lister les scenarios disponibles
+- `--run-all` : Executer tous les tests
+- `--run T1,T2,T3` : Executer tests specifiques
+- `--cleanup` : Nettoyer apres (optionnel, garde par defaut)
+
+---
+
+### Autres taches futures
+
 1. **CLI**: `anemonesync --dehydrate <job-id> [--days 30]`
-2. **Gros fichiers**: Tester avec fichiers > 100MB
-3. **Cleanup**: Supprimer les logs DEBUG excessifs
+2. **Cleanup**: Supprimer les logs DEBUG excessifs
+3. **Tests**: Serveur offline, interruption reseau
