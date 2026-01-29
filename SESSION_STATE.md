@@ -269,15 +269,15 @@ Ce fichier contient un index court de chaque session. Les details sont dans `ses
 **Resume**: Outil CLI cloudfiles_test.exe, 8/8 tests passent | **Commit**: e2aeff0
 
 ## Session 066 - 2026-01-29
-**Status**: In Progress | **Phase**: Cleanup + CLI Dehydrate
-**Resume**: Cleanup logs DEBUG (142->53), CLI --dehydrate
+**Status**: Done | **Phase**: Cleanup + CLI Dehydrate
+**Resume**: Cleanup logs DEBUG (142->53), CLI --dehydrate implementé
 
 ---
 
 ## Prochaines etapes
 
 1. ~~Commit des corrections~~ Done (e2aeff0)
-2. ~~Supprimer les logs DEBUG excessifs dans cloudfiles/~~ Done (142->53 occurrences)
-3. [ ] CLI: `anemonesync --dehydrate <job-id> [--days 30]`
+2. ~~Supprimer les logs DEBUG excessifs dans cloudfiles/~~ Done (69e26ea)
+3. ~~CLI: `anemonesync --dehydrate <job-id> [--days N]`~~ Done
 4. [ ] Tests avances: serveur offline, interruption reseau
 5. [ ] Niveau de log configurable depuis l'application

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/juste-un-gars/anemone_sync_windows/internal/app"
+	"github.com/juste-un-gars/anemone_sync_windows/internal/cloudfiles"
 	"github.com/juste-un-gars/anemone_sync_windows/internal/config"
 	"github.com/juste-un-gars/anemone_sync_windows/internal/database"
 	"github.com/juste-un-gars/anemone_sync_windows/internal/sync"
@@ -19,16 +21,20 @@ import (
 
 // CLIOptions represents parsed command-line options.
 type CLIOptions struct {
-	ListJobs  bool
-	SyncJobID int64 // 0 = not set
-	SyncAll   bool
-	Help      bool
+	ListJobs       bool
+	SyncJobID      int64 // 0 = not set
+	SyncAll        bool
+	DehydrateJobID int64 // 0 = not set
+	DehydrateDays  int   // -1 = not set (use job default), 0 = all files
+	Help           bool
 }
 
 // parseCLIArgs parses command-line arguments.
 // Returns nil if no CLI arguments are present (GUI mode).
 func parseCLIArgs(args []string) *CLIOptions {
-	opts := &CLIOptions{}
+	opts := &CLIOptions{
+		DehydrateDays: -1, // -1 means use job default
+	}
 	hasCliArg := false
 
 	for i := 0; i < len(args); i++ {
@@ -60,6 +66,37 @@ func parseCLIArgs(args []string) *CLIOptions {
 				opts.SyncJobID = id
 			} else {
 				fmt.Fprintf(os.Stderr, "Error: --sync requires a job ID\n")
+				os.Exit(1)
+			}
+
+		case "-d", "--dehydrate":
+			hasCliArg = true
+			// Get next argument as job ID
+			if i+1 < len(args) {
+				i++
+				id, err := strconv.ParseInt(args[i], 10, 64)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Error: invalid job ID '%s'\n", args[i])
+					os.Exit(1)
+				}
+				opts.DehydrateJobID = id
+			} else {
+				fmt.Fprintf(os.Stderr, "Error: --dehydrate requires a job ID\n")
+				os.Exit(1)
+			}
+
+		case "--days":
+			// Get next argument as days count
+			if i+1 < len(args) {
+				i++
+				days, err := strconv.Atoi(args[i])
+				if err != nil || days < 0 {
+					fmt.Fprintf(os.Stderr, "Error: invalid days value '%s' (must be >= 0)\n", args[i])
+					os.Exit(1)
+				}
+				opts.DehydrateDays = days
+			} else {
+				fmt.Fprintf(os.Stderr, "Error: --days requires a number\n")
 				os.Exit(1)
 			}
 
@@ -102,6 +139,11 @@ func runCLI(opts *CLIOptions, logger *zap.Logger) error {
 	// Handle list-jobs
 	if opts.ListJobs {
 		return runListJobs(db)
+	}
+
+	// Handle dehydrate
+	if opts.DehydrateJobID > 0 {
+		return runDehydrate(db, opts.DehydrateJobID, opts.DehydrateDays, logger)
 	}
 
 	// For sync operations, we need the engine
@@ -155,17 +197,22 @@ Usage:
   anemonesync [options]
 
 Options:
-  -l, --list-jobs     List all configured sync jobs
-  -s, --sync <id>     Sync a specific job by ID
-  -a, --sync-all      Sync all enabled jobs
-  -h, --help          Show this help message
+  -l, --list-jobs          List all configured sync jobs
+  -s, --sync <id>          Sync a specific job by ID
+  -a, --sync-all           Sync all enabled jobs
+  -d, --dehydrate <id>     Free up space by dehydrating files (Files On Demand)
+      --days <n>           Only dehydrate files not accessed for N days (default: job setting, 0 = all)
+  -h, --help               Show this help message
 
 Without options, starts the GUI application.
 
 Examples:
   anemonesync --list-jobs
   anemonesync --sync 1
-  anemonesync --sync-all`)
+  anemonesync --sync-all
+  anemonesync --dehydrate 1              # Use job's auto-dehydrate setting
+  anemonesync --dehydrate 1 --days 30    # Files not accessed for 30+ days
+  anemonesync --dehydrate 1 --days 0     # All hydrated files`)
 }
 
 // runListJobs lists all configured sync jobs.
@@ -422,4 +469,130 @@ func formatBytes(bytes int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
+}
+
+// runDehydrate dehydrates files for a job with Files On Demand enabled.
+func runDehydrate(db *database.DB, jobID int64, days int, logger *zap.Logger) error {
+	// Get job
+	job, err := db.GetSyncJob(jobID)
+	if err != nil {
+		return fmt.Errorf("failed to get job: %w", err)
+	}
+	if job == nil {
+		return fmt.Errorf("job with ID %d not found", jobID)
+	}
+
+	// Parse job options
+	opts := app.ParseJobOptions(job.NetworkConditions)
+	if !opts.FilesOnDemand {
+		return fmt.Errorf("job \"%s\" does not have Files On Demand enabled", job.Name)
+	}
+
+	// Determine days threshold
+	daysThreshold := days
+	if days < 0 {
+		// Use job's auto-dehydrate setting
+		daysThreshold = opts.AutoDehydrateDays
+		if daysThreshold == 0 {
+			fmt.Println("Note: Job has no auto-dehydrate setting. Use --days 0 to dehydrate all files.")
+			return nil
+		}
+	}
+
+	fmt.Printf("Dehydrating \"%s\" (ID: %d)\n", job.Name, job.ID)
+	fmt.Printf("  Local path: %s\n", job.LocalPath)
+	if daysThreshold > 0 {
+		fmt.Printf("  Threshold:  Files not accessed for %d+ days\n", daysThreshold)
+	} else {
+		fmt.Printf("  Threshold:  All hydrated files\n")
+	}
+	fmt.Println()
+
+	// Create sync root manager
+	syncRootConfig := cloudfiles.SyncRootConfig{
+		Path:            job.LocalPath,
+		ProviderName:    "AnemoneSync",
+		ProviderVersion: "1.0.0",
+	}
+
+	syncRoot, err := cloudfiles.NewSyncRootManager(syncRootConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create sync root manager: %w", err)
+	}
+
+	// Create dehydration manager with policy
+	policy := cloudfiles.DehydrationPolicy{
+		MaxAgeDays:  daysThreshold,
+		MinFileSize: 0, // No minimum size
+	}
+
+	dm := cloudfiles.NewDehydrationManager(syncRoot, policy, logger)
+
+	// Scan for hydrated files
+	ctx := context.Background()
+	fmt.Println("[Scanning]     Looking for hydrated files...")
+
+	hydratedFiles, err := dm.ScanHydratedFiles(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to scan: %w", err)
+	}
+
+	if len(hydratedFiles) == 0 {
+		fmt.Println("[Complete]     No hydrated files found.")
+		return nil
+	}
+
+	// Filter eligible files
+	var eligible []cloudfiles.HydratedFileInfo
+	var totalSize int64
+	for _, f := range hydratedFiles {
+		if daysThreshold == 0 || f.DaysSinceAccess >= daysThreshold {
+			eligible = append(eligible, f)
+			totalSize += f.Size
+		}
+	}
+
+	if len(eligible) == 0 {
+		fmt.Printf("[Complete]     Found %d hydrated files, but none meet the criteria.\n", len(hydratedFiles))
+		return nil
+	}
+
+	fmt.Printf("[Found]        %d files eligible for dehydration (%s)\n", len(eligible), formatBytes(totalSize))
+	fmt.Println()
+
+	// Dehydrate files
+	dehydrated := 0
+	var freedBytes int64
+	errors := 0
+
+	for i, file := range eligible {
+		// Progress
+		percent := float64(i+1) / float64(len(eligible)) * 100
+		fmt.Printf("\r[Dehydrating]  %d/%d (%.0f%%) - %s", i+1, len(eligible), percent, truncateString(file.Path, 40))
+
+		if err := dm.DehydrateFile(ctx, file.Path); err != nil {
+			errors++
+			logger.Warn("failed to dehydrate file",
+				zap.String("path", file.Path),
+				zap.Error(err),
+			)
+			continue
+		}
+
+		dehydrated++
+		freedBytes += file.Size
+	}
+
+	fmt.Println()
+	fmt.Println()
+
+	// Summary
+	fmt.Println("[Complete]     Dehydration finished.")
+	fmt.Printf("  Files dehydrated: %d\n", dehydrated)
+	fmt.Printf("  Space freed:      %s\n", formatBytes(freedBytes))
+	if errors > 0 {
+		fmt.Printf("  Errors:           %d\n", errors)
+	}
+
+	return nil
 }
