@@ -119,12 +119,7 @@ func handleSharedFetchRequest(logger *zap.Logger) {
 	// Normalize to forward slashes
 	relativePath = strings.ReplaceAll(relativePath, "\\", "/")
 
-	logger.Debug("handleSharedFetchRequest",
-		zap.String("normalized_path", filePath),
-		zap.String("relative_path", relativePath),
-		zap.Int64("offset", offset),
-		zap.Int64("max_length", maxLength),
-	)
+	// Debug logging removed - enable in C bridge (g_debugLogging=1) for troubleshooting
 
 	// Get reader from data provider
 	ctx := context.Background()
@@ -163,10 +158,7 @@ func handleSharedFetchRequest(logger *zap.Logger) {
 	sharedReq.errorCode = 0
 	sharedReq.dataLength = C.int64_t(n)
 
-	logger.Debug("handleSharedFetchRequest: read complete",
-		zap.String("path", relativePath),
-		zap.Int("bytes_read", n),
-	)
+	// Read complete - debug logging removed
 
 	// Signal that data is ready for C to read
 	C.CfapiBridgeSignalDataReady()
@@ -466,19 +458,14 @@ func (b *BridgeManager) processLoop(ctx context.Context) {
 
 	defer close(b.doneChan)
 
-	b.logger.Debug("bridge process loop started on dedicated OS thread")
-
 	// Get the request ready event handle for shared fetch
 	requestReadyEvent := GetRequestReadyEvent()
-	b.logger.Debug("request ready event handle", zap.Uint64("handle", uint64(requestReadyEvent)))
 
 	for {
 		select {
 		case <-ctx.Done():
-			b.logger.Debug("bridge process loop stopping: context cancelled")
 			return
 		case <-b.stopChan:
-			b.logger.Debug("bridge process loop stopping: stop signal received")
 			return
 		default:
 		}
@@ -491,7 +478,6 @@ func (b *BridgeManager) processLoop(ctx context.Context) {
 				0, // No wait - just check
 			)
 			if waitResult == 0 { // WAIT_OBJECT_0 = 0
-				b.logger.Debug("handling shared fetch request")
 				handleSharedFetchRequest(b.logger)
 				continue // Check for more requests immediately
 			}
@@ -563,17 +549,9 @@ func (b *BridgeManager) handleFetchData(req *C.CfapiBridgeRequest, handler func(
 	// with "invalid pointer found on stack" because HANDLEs are small integers.
 	completionEvent := uintptr(req.completionEvent)
 
-	b.logger.Debug("handling FETCH_DATA",
-		zap.String("path", filePath),
-		zap.Int64("file_size", int64(req.fileSize)),
-		zap.Int64("offset", int64(req.requiredOffset)),
-		zap.Int64("length", int64(req.requiredLength)),
-	)
-
 	// Always signal completion at the end to unblock the C callback
 	defer func() {
 		if completionEvent != 0 {
-			b.logger.Debug("signaling transfer complete")
 			C.CfapiBridgeSignalTransferComplete(unsafe.Pointer(completionEvent))
 		}
 	}()
@@ -609,8 +587,6 @@ func (b *BridgeManager) handleFetchData(req *C.CfapiBridgeRequest, handler func(
 				zap.String("path", filePath),
 				zap.Int32("result", int32(result)),
 			)
-		} else {
-			b.logger.Debug("transfer complete signaled to Windows", zap.String("path", filePath))
 		}
 	}
 }
@@ -618,9 +594,6 @@ func (b *BridgeManager) handleFetchData(req *C.CfapiBridgeRequest, handler func(
 // handleCancelFetch handles a CANCEL_FETCH_DATA callback.
 func (b *BridgeManager) handleCancelFetch(req *C.CfapiBridgeRequest, handler func(string)) {
 	filePath := wcharToString((*uint16)(unsafe.Pointer(&req.filePath[0])))
-
-	b.logger.Debug("handling CANCEL_FETCH_DATA", zap.String("path", filePath))
-
 	if handler != nil {
 		handler(filePath)
 	}
@@ -630,12 +603,6 @@ func (b *BridgeManager) handleCancelFetch(req *C.CfapiBridgeRequest, handler fun
 func (b *BridgeManager) handleNotifyDelete(req *C.CfapiBridgeRequest, handler func(string, bool) bool) {
 	filePath := wcharToString((*uint16)(unsafe.Pointer(&req.filePath[0])))
 	isDir := req.isDirectory != 0
-
-	b.logger.Debug("handling NOTIFY_DELETE",
-		zap.String("path", filePath),
-		zap.Bool("is_directory", isDir),
-	)
-
 	// For notifications, we just inform the handler - can't block the operation
 	if handler != nil {
 		handler(filePath, isDir)
@@ -647,13 +614,6 @@ func (b *BridgeManager) handleNotifyRename(req *C.CfapiBridgeRequest, handler fu
 	sourcePath := wcharToString((*uint16)(unsafe.Pointer(&req.filePath[0])))
 	targetPath := wcharToString((*uint16)(unsafe.Pointer(&req.targetPath[0])))
 	isDir := req.isDirectory != 0
-
-	b.logger.Debug("handling NOTIFY_RENAME",
-		zap.String("source", sourcePath),
-		zap.String("target", targetPath),
-		zap.Bool("is_directory", isDir),
-	)
-
 	// For notifications, we just inform the handler - can't block the operation
 	if handler != nil {
 		handler(sourcePath, targetPath, isDir)

@@ -2,9 +2,9 @@
 
 Ce fichier contient un index court de chaque session. Les details sont dans `sessions/session_XXX.md`.
 
-**Derniere session**: 065 (2026-01-29)
-**Phase en cours**: Cloud Files Tests
-**Prochaine etape**: Session complete - tous les tests passent (8/8)
+**Derniere session**: 066 (2026-01-29)
+**Phase en cours**: Cleanup + CLI Dehydrate
+**Prochaine etape**: Cleanup logs DEBUG cloudfiles/
 
 ---
 
@@ -266,31 +266,18 @@ Ce fichier contient un index court de chaque session. Les details sont dans `ses
 
 ## Session 065 - 2026-01-29
 **Status**: Done | **Phase**: Cloud Files Tests
-**Resume**: Outil CLI cloudfiles_test.exe, 8/8 tests passent
+**Resume**: Outil CLI cloudfiles_test.exe, 8/8 tests passent | **Commit**: e2aeff0
 
-**Resultats finaux:**
-| Test | Status | Notes |
-|------|--------|-------|
-| T1 Hydratation | PASS | OK |
-| T2 Deshydratation | PASS | OK (avec retry pour race condition) |
-| T3 Cycle complet | PASS | Fix: upload placeholders hydrates |
-| T4 Upload local | PASS | OK |
-| T5 Structure imbriquee | PASS | OK |
-| T6 Gros fichier | PASS | OK (6.6s pour 50+ MB) |
-| T7 Modif serveur | PASS | Fix: download si remote plus recent |
-| T8 Suppression serveur | PASS | OK |
-
-**Corrections appliquees:**
-- SMB: permettre upload de fichiers Cloud Files (reparse points)
-- RunSync: upload si local plus recent OU taille differente (local modifie)
-- RunSync: download si remote plus recent ET taille differente
-- Distinction correcte IsPlaceholder vs IsDehydrated (PARTIAL)
+## Session 066 - 2026-01-29
+**Status**: In Progress | **Phase**: Cleanup + CLI Dehydrate
+**Resume**: Cleanup logs DEBUG (142->53), CLI --dehydrate
 
 ---
 
 ## Prochaines etapes
 
-1. Commit des corrections (SMB upload, RunSync bidirectionnel)
-2. Supprimer les logs DEBUG excessifs dans cloudfiles/
-3. CLI: `anemonesync --dehydrate <job-id> [--days 30]`
-4. Tests avances: serveur offline, interruption reseau
+1. ~~Commit des corrections~~ Done (e2aeff0)
+2. ~~Supprimer les logs DEBUG excessifs dans cloudfiles/~~ Done (142->53 occurrences)
+3. [ ] CLI: `anemonesync --dehydrate <job-id> [--days 30]`
+4. [ ] Tests avances: serveur offline, interruption reseau
+5. [ ] Niveau de log configurable depuis l'application

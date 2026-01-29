@@ -65,11 +65,6 @@ func (a *SMBClientAdapter) GetFileReader(ctx context.Context, relativePath strin
 	// Normalize to forward slashes for SMB
 	remotePath = strings.ReplaceAll(remotePath, "\\", "/")
 
-	a.logger.Debug("opening file for hydration",
-		zap.String("remote_path", remotePath),
-		zap.Int64("offset", offset),
-	)
-
 	// Open the file
 	reader, err := a.client.OpenFile(remotePath)
 	if err != nil {
@@ -89,10 +84,6 @@ func (a *SMBClientAdapter) GetFileReader(ctx context.Context, relativePath strin
 
 // ListFiles implements DataSource.
 func (a *SMBClientAdapter) ListFiles(ctx context.Context) ([]RemoteFileInfo, error) {
-	a.logger.Debug("listing remote files",
-		zap.String("share_path", a.sharePath),
-	)
-
 	// List files recursively
 	var allFiles []RemoteFileInfo
 	err := a.listRecursive(ctx, a.sharePath, &allFiles)
@@ -153,11 +144,6 @@ func (a *SMBClientAdapter) listRecursive(ctx context.Context, path string, files
 				relativePath = strings.TrimPrefix(relativePath, "/")
 			}
 
-			a.logger.Debug("found remote file",
-				zap.String("path", relativePath),
-				zap.Int64("size", entry.Size),
-				zap.Time("mod_time", entry.ModTime),
-			)
 			*files = append(*files, RemoteFileInfo{
 				Path:        relativePath,
 				Size:        entry.Size,

@@ -142,12 +142,6 @@ func (dm *DehydrationManager) filterEligibleFiles(files []HydratedFileInfo, poli
 func (dm *DehydrationManager) DehydrateFile(ctx context.Context, relativePath string) error {
 	fullPath := filepath.Join(dm.syncRoot.Path(), relativePath)
 
-	dm.logger.Debug("dehydrating file",
-		zap.String("path", relativePath),
-	)
-
-	fmt.Printf("[DEBUG Dehydrate] File: %s\n", fullPath)
-
 	// First, get the file size using regular file operations
 	fi, err := os.Stat(fullPath)
 	if err != nil {
@@ -168,7 +162,6 @@ func (dm *DehydrationManager) DehydrateFile(ctx context.Context, relativePath st
 	if err != nil {
 		return fmt.Errorf("failed to get Win32 handle: %w", err)
 	}
-	fmt.Printf("[DEBUG Dehydrate] protectedHandle=%v, win32Handle=%v\n", protectedHandle, win32Handle)
 
 	// Check placeholder state before dehydration using GetFileInformationByHandle
 	var fileInfo windows.ByHandleFileInformation
@@ -177,14 +170,10 @@ func (dm *DehydrationManager) DehydrateFile(ctx context.Context, relativePath st
 	}
 
 	stateBefore := GetPlaceholderState(fileInfo.FileAttributes, IO_REPARSE_TAG_CLOUD)
-	fmt.Printf("[DEBUG Dehydrate] Before: attrs=0x%08X, state=0x%08X, size=%d\n",
-		fileInfo.FileAttributes, stateBefore, fileSize)
 
 	// Check if file is already a placeholder
 	isPlaceholder := stateBefore&CF_PLACEHOLDER_STATE_PLACEHOLDER != 0
 	isPartial := stateBefore&CF_PLACEHOLDER_STATE_PARTIAL != 0
-	fmt.Printf("[DEBUG Dehydrate] isPlaceholder=%v, isPartial=%v (partial=already dehydrated)\n",
-		isPlaceholder, isPartial)
 
 	if !isPlaceholder {
 		return fmt.Errorf("file is not a placeholder")
@@ -197,20 +186,9 @@ func (dm *DehydrationManager) DehydrateFile(ctx context.Context, relativePath st
 	}
 
 	// Use CfUpdatePlaceholder with DEHYDRATE + MARK_IN_SYNC flags
-	// This is the recommended approach per Microsoft docs:
-	// - MARK_IN_SYNC ensures the file is marked as synchronized
-	// - DEHYDRATE removes the local content in one atomic operation
 	// Using the protected handle from CfOpenFileWithOplock (exclusive access required)
-	fmt.Printf("[DEBUG Dehydrate] Calling CfUpdatePlaceholder with DEHYDRATE|MARK_IN_SYNC flags\n")
 	if err := UpdatePlaceholder(protectedHandle, CF_UPDATE_FLAG_DEHYDRATE|CF_UPDATE_FLAG_MARK_IN_SYNC); err != nil {
 		return fmt.Errorf("failed to dehydrate via CfUpdatePlaceholder: %w", err)
-	}
-
-	// Check state after dehydration
-	if err := windows.GetFileInformationByHandle(win32Handle, &fileInfo); err == nil {
-		stateAfter := GetPlaceholderState(fileInfo.FileAttributes, IO_REPARSE_TAG_CLOUD)
-		fmt.Printf("[DEBUG Dehydrate] After: attrs=0x%08X, state=0x%08X\n",
-			fileInfo.FileAttributes, stateAfter)
 	}
 
 	dm.logger.Info("file dehydrated",

@@ -23,12 +23,6 @@ func RegisterSyncRoot(syncRootPath string, registration *CF_SYNC_REGISTRATION, p
 		return fmt.Errorf("invalid sync root path: %w", err)
 	}
 
-	fmt.Printf("[DEBUG CloudFiles] RegisterSyncRoot: path=%s\n", syncRootPath)
-	fmt.Printf("[DEBUG CloudFiles] Registration: StructSize=%d, ProviderName=%p, ProviderId=%+v\n",
-		registration.StructSize, registration.ProviderName, registration.ProviderId)
-	fmt.Printf("[DEBUG CloudFiles] Policies: StructSize=%d, Hydration=%+v, Population=%+v\n",
-		policies.StructSize, policies.Hydration, policies.Population)
-
 	hr, _, lastErr := procCfRegisterSyncRoot.Call(
 		uintptr(unsafe.Pointer(pathPtr)),
 		uintptr(unsafe.Pointer(registration)),
@@ -36,13 +30,12 @@ func RegisterSyncRoot(syncRootPath string, registration *CF_SYNC_REGISTRATION, p
 		uintptr(flags),
 	)
 
-	fmt.Printf("[DEBUG CloudFiles] RegisterSyncRoot result: HRESULT=0x%08X, lastErr=%v\n", hr, lastErr)
+	_ = lastErr // Ignore for now
 
 	if hr != S_OK {
 		return fmt.Errorf("CfRegisterSyncRoot failed: HRESULT 0x%08X (%s)", hr, decodeHRESULT(uint32(hr)))
 	}
 
-	fmt.Printf("[DEBUG CloudFiles] RegisterSyncRoot SUCCESS\n")
 	return nil
 }
 
@@ -108,9 +101,6 @@ func ConnectSyncRoot(syncRootPath string, callbacks []CF_CALLBACK_REGISTRATION, 
 	// Ensure callback table ends with CF_CALLBACK_REGISTRATION_END
 	callbackTable := append(callbacks, CF_CALLBACK_REGISTRATION_END)
 
-	fmt.Printf("[DEBUG CloudFiles] ConnectSyncRoot: path=%s, callbacks=%d, flags=0x%X\n",
-		syncRootPath, len(callbacks), flags)
-
 	var connectionKey CF_CONNECTION_KEY
 
 	hr, _, lastErr := procCfConnectSyncRoot.Call(
@@ -121,14 +111,11 @@ func ConnectSyncRoot(syncRootPath string, callbacks []CF_CALLBACK_REGISTRATION, 
 		uintptr(unsafe.Pointer(&connectionKey)),
 	)
 
-	fmt.Printf("[DEBUG CloudFiles] ConnectSyncRoot result: HRESULT=0x%08X, connectionKey=%d, lastErr=%v\n",
-		hr, connectionKey, lastErr)
+	_ = lastErr // Ignore for now
 
 	if hr != S_OK {
 		return nil, fmt.Errorf("CfConnectSyncRoot failed: HRESULT 0x%08X (%s)", hr, decodeHRESULT(uint32(hr)))
 	}
-
-	fmt.Printf("[DEBUG CloudFiles] ConnectSyncRoot SUCCESS, connectionKey=%d\n", connectionKey)
 
 	return &SyncRootConnection{
 		ConnectionKey:   connectionKey,

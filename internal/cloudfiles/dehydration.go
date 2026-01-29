@@ -189,8 +189,6 @@ func (dm *DehydrationManager) scanLoop(ctx context.Context) {
 
 // runScan performs a single dehydration scan.
 func (dm *DehydrationManager) runScan(ctx context.Context) {
-	dm.logger.Debug("starting dehydration scan")
-
 	dm.mu.Lock()
 	dm.stats.LastScanTime = time.Now()
 	policy := dm.policy

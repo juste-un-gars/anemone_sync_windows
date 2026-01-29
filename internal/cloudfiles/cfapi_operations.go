@@ -45,17 +45,12 @@ func SetInSyncState(fileHandle windows.Handle, inSyncState uint32, usn *int64) e
 		usnPtr = uintptr(unsafe.Pointer(usn))
 	}
 
-	fmt.Printf("[DEBUG CfSetInSyncState] handle=%v, inSyncState=%d, usnPtr=%v\n",
-		fileHandle, inSyncState, usnPtr)
-
-	hr, _, lastErr := procCfSetInSyncState.Call(
+	hr, _, _ := procCfSetInSyncState.Call(
 		uintptr(fileHandle),
 		uintptr(inSyncState),
 		0, // IN_SYNC_FLAGS
 		usnPtr,
 	)
-
-	fmt.Printf("[DEBUG CfSetInSyncState] HRESULT=0x%08X, lastErr=%v\n", hr, lastErr)
 
 	if hr != S_OK {
 		return fmt.Errorf("CfSetInSyncState failed: HRESULT 0x%08X (%s)", hr, decodeHRESULT(uint32(hr)))
@@ -224,14 +219,11 @@ func OpenFileWithOplock(filePath string, flags CF_OPEN_FILE_FLAGS) (windows.Hand
 
 	var handle windows.Handle
 
-	hr, _, lastErr := procCfOpenFileWithOplock.Call(
+	hr, _, _ := procCfOpenFileWithOplock.Call(
 		uintptr(unsafe.Pointer(pathPtr)),
 		uintptr(flags),
 		uintptr(unsafe.Pointer(&handle)),
 	)
-
-	fmt.Printf("[DEBUG CfOpenFileWithOplock] path=%s, flags=0x%X, hr=0x%08X, handle=%v, lastErr=%v\n",
-		filePath, flags, hr, handle, lastErr)
 
 	if hr != S_OK {
 		return 0, fmt.Errorf("CfOpenFileWithOplock failed: HRESULT 0x%08X (%s)", hr, decodeHRESULT(uint32(hr)))
@@ -325,8 +317,6 @@ func UpdatePlaceholder(fileHandle windows.Handle, flags CF_UPDATE_FLAGS) error {
 		return fmt.Errorf("CfUpdatePlaceholder not available: %w", err)
 	}
 
-	fmt.Printf("[DEBUG CfUpdatePlaceholder] handle=%v, flags=0x%X\n", fileHandle, flags)
-
 	// CfUpdatePlaceholder signature:
 	// HRESULT CfUpdatePlaceholder(
 	//   HANDLE FileHandle,
@@ -339,7 +329,7 @@ func UpdatePlaceholder(fileHandle windows.Handle, flags CF_UPDATE_FLAGS) error {
 	//   USN *UpdateUsn,                          // NULL = don't return USN
 	//   LPOVERLAPPED Overlapped                  // NULL = synchronous
 	// )
-	hr, _, lastErr := procCfUpdatePlaceholder.Call(
+	hr, _, _ := procCfUpdatePlaceholder.Call(
 		uintptr(fileHandle),
 		0, // FsMetadata - NULL
 		0, // FileIdentity - NULL
@@ -350,8 +340,6 @@ func UpdatePlaceholder(fileHandle windows.Handle, flags CF_UPDATE_FLAGS) error {
 		0, // UpdateUsn - NULL
 		0, // Overlapped - NULL (synchronous)
 	)
-
-	fmt.Printf("[DEBUG CfUpdatePlaceholder] HRESULT=0x%08X, lastErr=%v\n", hr, lastErr)
 
 	if hr != S_OK {
 		return fmt.Errorf("CfUpdatePlaceholder failed: HRESULT 0x%08X (%s)", hr, decodeHRESULT(uint32(hr)))

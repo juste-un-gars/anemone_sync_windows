@@ -27,12 +27,6 @@ func (p *CloudFilesProvider) handleFetchData(info *FetchDataInfo) error {
 		return fmt.Errorf("no data source configured")
 	}
 
-	p.logger.Debug("handling fetch data request",
-		zap.String("file", info.FilePath),
-		zap.Int64("offset", info.RequiredOffset),
-		zap.Int64("length", info.RequiredLength),
-	)
-
 	ctx := context.Background() // TODO: Use cancellable context
 	return hydration.HandleFetchData(ctx, info)
 }
@@ -58,22 +52,11 @@ func (p *CloudFilesProvider) handleCancelFetch(filePath string) {
 }
 
 func (p *CloudFilesProvider) handleNotifyDelete(filePath string, isDirectory bool) bool {
-	p.logger.Debug("file deleted",
-		zap.String("file", filePath),
-		zap.Bool("is_directory", isDirectory),
-	)
-
 	// Allow deletion
 	return true
 }
 
 func (p *CloudFilesProvider) handleNotifyRename(sourcePath, targetPath string, isDirectory bool) bool {
-	p.logger.Debug("file renamed",
-		zap.String("source", sourcePath),
-		zap.String("target", targetPath),
-		zap.Bool("is_directory", isDirectory),
-	)
-
 	// Allow rename
 	return true
 }

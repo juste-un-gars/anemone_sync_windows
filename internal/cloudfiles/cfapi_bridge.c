@@ -14,7 +14,7 @@
 #endif
 
 // --- Debug logging ---
-static int g_debugLogging = 1; // Enable verbose debug logging
+static int g_debugLogging = 0; // Disabled by default (set to 1 for troubleshooting)
 
 static void DebugLog(const char* format, ...) {
     if (!g_debugLogging) return;

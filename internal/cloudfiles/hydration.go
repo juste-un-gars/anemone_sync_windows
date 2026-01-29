@@ -208,21 +208,10 @@ func (h *HydrationHandler) HandleFetchData(ctx context.Context, info *FetchDataI
 	if protectedHandle, err := OpenFileWithOplock(fullPath, CF_OPEN_FILE_FLAG_WRITE_ACCESS); err == nil {
 		defer CloseHandle(protectedHandle)
 
-		// Get Win32 handle to check state before/after
+		// Get Win32 handle for CfUpdatePlaceholder
 		win32Handle, _ := GetWin32HandleFromProtectedHandle(protectedHandle)
 
-		// Check state BEFORE
-		if win32Handle != 0 {
-			var fileInfo windows.ByHandleFileInformation
-			if err := windows.GetFileInformationByHandle(win32Handle, &fileInfo); err == nil {
-				stateBefore := GetPlaceholderState(fileInfo.FileAttributes, IO_REPARSE_TAG_CLOUD)
-				fmt.Printf("[DEBUG MarkInSync] BEFORE: attrs=0x%08X, state=0x%08X, IN_SYNC=%v\n",
-					fileInfo.FileAttributes, stateBefore, stateBefore&CF_PLACEHOLDER_STATE_IN_SYNC != 0)
-			}
-		}
-
-		// Try CfUpdatePlaceholder with MARK_IN_SYNC flag first (recommended approach)
-		// This is more reliable than CfSetInSyncState according to MS docs
+		// Use CfUpdatePlaceholder with MARK_IN_SYNC flag (recommended approach)
 		err := UpdatePlaceholder(win32Handle, CF_UPDATE_FLAG_MARK_IN_SYNC)
 		if err != nil {
 			h.logger.Warn("CfUpdatePlaceholder failed, trying CfSetInSyncState",
@@ -235,20 +224,6 @@ func (h *HydrationHandler) HandleFetchData(ctx context.Context, info *FetchDataI
 					zap.String("file", relativePath),
 					zap.Error(err),
 				)
-			}
-		} else {
-			h.logger.Debug("marked file as in-sync via CfUpdatePlaceholder",
-				zap.String("file", relativePath),
-			)
-		}
-
-		// Check state AFTER
-		if win32Handle != 0 {
-			var fileInfo windows.ByHandleFileInformation
-			if err := windows.GetFileInformationByHandle(win32Handle, &fileInfo); err == nil {
-				stateAfter := GetPlaceholderState(fileInfo.FileAttributes, IO_REPARSE_TAG_CLOUD)
-				fmt.Printf("[DEBUG MarkInSync] AFTER: attrs=0x%08X, state=0x%08X, IN_SYNC=%v\n",
-					fileInfo.FileAttributes, stateAfter, stateAfter&CF_PLACEHOLDER_STATE_IN_SYNC != 0)
 			}
 		}
 	} else {

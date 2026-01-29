@@ -27,11 +27,9 @@ func CreatePlaceholders(basePath string, placeholders []CF_PLACEHOLDER_CREATE_IN
 		return fmt.Errorf("invalid base path: %w", err)
 	}
 
-	fmt.Printf("[DEBUG CloudFiles] CreatePlaceholders: basePath=%s, count=%d\n", basePath, len(placeholders))
-
 	var entriesProcessed uint32
 
-	hr, _, lastErr := procCfCreatePlaceholders.Call(
+	hr, _, _ := procCfCreatePlaceholders.Call(
 		uintptr(unsafe.Pointer(pathPtr)),
 		uintptr(unsafe.Pointer(&placeholders[0])),
 		uintptr(len(placeholders)),
@@ -39,18 +37,11 @@ func CreatePlaceholders(basePath string, placeholders []CF_PLACEHOLDER_CREATE_IN
 		uintptr(unsafe.Pointer(&entriesProcessed)),
 	)
 
-	fmt.Printf("[DEBUG CloudFiles] CreatePlaceholders result: HRESULT=0x%08X, processed=%d/%d, lastErr=%v\n",
-		hr, entriesProcessed, len(placeholders), lastErr)
-
 	// 0x800700B7 = HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS) - not an error if file exists
 	const HRESULT_ALREADY_EXISTS = 0x800700B7
 
 	if hr != S_OK && hr != HRESULT_ALREADY_EXISTS {
 		return fmt.Errorf("CfCreatePlaceholders failed: HRESULT 0x%08X (processed %d/%d)", hr, entriesProcessed, len(placeholders))
-	}
-
-	if hr == HRESULT_ALREADY_EXISTS {
-		fmt.Printf("[DEBUG CloudFiles] CreatePlaceholders: some placeholders already exist (OK)\n")
 	}
 
 	return nil
@@ -97,18 +88,13 @@ func DehydratePlaceholder(fileHandle windows.Handle, startingOffset, length int6
 	offset := LARGE_INTEGER{QuadPart: startingOffset}
 	size := LARGE_INTEGER{QuadPart: length}
 
-	fmt.Printf("[DEBUG Dehydrate] Calling CfDehydratePlaceholder: handle=%v, offset=%d, length=%d, flags=%d\n",
-		fileHandle, startingOffset, length, flags)
-
-	hr, _, lastErr := procCfDehydratePlaceholder.Call(
+	hr, _, _ := procCfDehydratePlaceholder.Call(
 		uintptr(fileHandle),
 		uintptr(unsafe.Pointer(&offset)),
 		uintptr(unsafe.Pointer(&size)),
 		uintptr(flags),
 		0, // Overlapped - NULL for synchronous
 	)
-
-	fmt.Printf("[DEBUG Dehydrate] CfDehydratePlaceholder result: HRESULT=0x%08X, lastErr=%v\n", hr, lastErr)
 
 	if hr != S_OK {
 		return fmt.Errorf("CfDehydratePlaceholder failed: HRESULT 0x%08X (%s)", hr, decodeHRESULT(uint32(hr)))
