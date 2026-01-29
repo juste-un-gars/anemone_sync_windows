@@ -167,9 +167,10 @@ func (c *SMBClient) Upload(localPath, remotePath string) error {
 		return fmt.Errorf("failed to get local file info: %w", err)
 	}
 
-	// Check if it's a regular file
-	if !localInfo.Mode().IsRegular() {
-		return fmt.Errorf("not a regular file: %s", localPath)
+	// Check if it's a directory (we can't upload directories this way)
+	// Note: Cloud Files placeholders are reparse points but can be read normally
+	if localInfo.IsDir() {
+		return fmt.Errorf("cannot upload directory: %s", localPath)
 	}
 
 	// Create remote directory if needed
