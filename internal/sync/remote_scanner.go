@@ -173,6 +173,13 @@ func (rs *RemoteScanner) scanDir(ctx context.Context, currentPath string, basePa
 				)
 			}
 		} else {
+			// Skip temporary upload files (from interrupted uploads)
+			if strings.HasSuffix(entry.Name, smb.UploadTempSuffix) {
+				rs.logger.Debug("skipping temp upload file",
+					zap.String("path", entry.Path))
+				continue
+			}
+
 			// Add file to result
 			// Normalize slashes before comparing (entry.Path may use \ on Windows)
 			entryPath := filepath.ToSlash(entry.Path)

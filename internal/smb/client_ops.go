@@ -138,9 +138,13 @@ func (c *SMBClient) OpenFile(remotePath string) (io.ReadCloser, error) {
 	return remoteFile, nil
 }
 
+// UploadTempSuffix is the suffix used for temporary upload files (atomic upload)
+const UploadTempSuffix = ".anemone-uploading"
+
 // Upload uploads a file from local filesystem to the SMB share
 // localPath is the absolute local path to the file
 // remotePath is relative to the share root (e.g., "folder/file.txt")
+// Uses atomic upload: writes to .anemone-uploading file first, then renames
 func (c *SMBClient) Upload(localPath, remotePath string) error {
 	c.mu.RLock()
 	if !c.connected {
@@ -180,19 +184,33 @@ func (c *SMBClient) Upload(localPath, remotePath string) error {
 		_ = fs.MkdirAll(remoteDir, 0755)
 	}
 
-	// Create remote file
-	remoteFile, err := fs.Create(remotePath)
+	// Use atomic upload: write to temp file first, then rename
+	tempPath := remotePath + UploadTempSuffix
+
+	// Create temp remote file
+	remoteFile, err := fs.Create(tempPath)
 	if err != nil {
-		return fmt.Errorf("failed to create remote file %s: %w", remotePath, err)
+		return fmt.Errorf("failed to create remote file %s: %w", tempPath, err)
 	}
-	defer remoteFile.Close()
 
 	// Copy data from local to remote
 	written, err := io.Copy(remoteFile, localFile)
+	remoteFile.Close() // Close before rename
+
 	if err != nil {
-		// Try to clean up incomplete remote file
-		fs.Remove(remotePath)
+		// Try to clean up incomplete temp file (may fail if connection lost)
+		fs.Remove(tempPath)
 		return fmt.Errorf("failed to copy data: %w", err)
+	}
+
+	// Remove existing file if present (rename won't overwrite on SMB)
+	fs.Remove(remotePath)
+
+	// Rename temp file to final name (atomic operation)
+	if err := fs.Rename(tempPath, remotePath); err != nil {
+		// Try to clean up temp file
+		fs.Remove(tempPath)
+		return fmt.Errorf("failed to rename temp file to %s: %w", remotePath, err)
 	}
 
 	c.logger.Info("file uploaded successfully",

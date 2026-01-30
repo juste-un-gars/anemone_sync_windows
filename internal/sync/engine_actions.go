@@ -25,7 +25,7 @@ func (e *Engine) prepareSync(ctx context.Context, req *SyncRequest) (*smb.SMBCli
 	}
 
 	// Parse RemotePath (UNC format: \\server\share\path) to extract server and share
-	server, share, _ := parseUNCPath(req.RemotePath)
+	server, share, relativePath := parseUNCPath(req.RemotePath)
 	if server == "" {
 		return nil, nil, fmt.Errorf("invalid remote path: server not found in %s", req.RemotePath)
 	}
@@ -44,6 +44,9 @@ func (e *Engine) prepareSync(ctx context.Context, req *SyncRequest) (*smb.SMBCli
 		return nil, nil, fmt.Errorf("failed to connect to SMB server: %w", err)
 	}
 
+	// Cleanup orphaned upload temp files from previous failed uploads
+	e.cleanupOrphanedUploads(smbClient, relativePath)
+
 	// Update job status to syncing
 	if err := e.db.UpdateJobStatus(req.JobID, "syncing"); err != nil {
 		smbClient.Disconnect()
@@ -56,6 +59,28 @@ func (e *Engine) prepareSync(ctx context.Context, req *SyncRequest) (*smb.SMBCli
 	)
 
 	return smbClient, job, nil
+}
+
+// cleanupOrphanedUploads removes .anemone-uploading files left by failed uploads
+func (e *Engine) cleanupOrphanedUploads(smbClient *smb.SMBClient, basePath string) {
+	files, err := smbClient.ListRemote(basePath)
+	if err != nil {
+		e.logger.Debug("failed to list remote for cleanup", zap.Error(err))
+		return
+	}
+
+	for _, file := range files {
+		if strings.HasSuffix(file.Name, smb.UploadTempSuffix) {
+			fullPath := filepath.ToSlash(filepath.Join(basePath, file.Name))
+			e.logger.Info("cleaning up orphaned upload file",
+				zap.String("path", fullPath))
+			if err := smbClient.Delete(fullPath); err != nil {
+				e.logger.Warn("failed to cleanup orphaned upload",
+					zap.String("path", fullPath),
+					zap.Error(err))
+			}
+		}
+	}
 }
 
 // detectChanges handles Phase 3: Detection

@@ -2,9 +2,9 @@
 
 Ce fichier contient un index court de chaque session. Les details sont dans `sessions/session_XXX.md`.
 
-**Derniere session**: 066 (2026-01-29)
-**Phase en cours**: Cleanup + CLI Dehydrate
-**Prochaine etape**: Cleanup logs DEBUG cloudfiles/
+**Derniere session**: 068 (2026-01-30)
+**Phase en cours**: Tests resilience + Upload atomique
+**Prochaine etape**: Ameliorations UX (notifications, icones status)
 
 ---
 
@@ -272,12 +272,17 @@ Ce fichier contient un index court de chaque session. Les details sont dans `ses
 **Status**: Done | **Phase**: Cleanup + CLI Dehydrate
 **Resume**: Cleanup logs DEBUG (142->53), CLI --dehydrate implementé
 
+## Session 067 - 2026-01-30
+**Status**: Done | **Phase**: Logging configurable
+**Resume**: Log rotation lumberjack, niveau dynamique UI (Debug/Info/Warning/Error/Off) | **Commit**: d886ab1
+
+## Session 068 - 2026-01-30
+**Status**: Done | **Phase**: Tests resilience + Upload atomique
+**Resume**: Fix upload interrompu (atomic upload .anemone-uploading), cleanup orphelins, TEST7 harness
+
 ---
 
 ## Prochaines etapes
 
-1. ~~Commit des corrections~~ Done (e2aeff0)
-2. ~~Supprimer les logs DEBUG excessifs dans cloudfiles/~~ Done (69e26ea)
-3. ~~CLI: `anemonesync --dehydrate <job-id> [--days N]`~~ Done
-4. [ ] Tests avances: serveur offline, interruption reseau
-5. [ ] Niveau de log configurable depuis l'application
+1. [x] Tests avances: serveur offline, interruption reseau
+2. [ ] Ameliorations UX (notifications, icones status)
