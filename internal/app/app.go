@@ -27,6 +27,7 @@ type App struct {
 	tray       *Tray
 	settings   *SettingsWindow
 	logger     *zap.Logger
+	logLevel   zap.AtomicLevel // Dynamic log level control
 	ctx        context.Context
 	cancel     context.CancelFunc
 	wg         gosync.WaitGroup
@@ -61,11 +62,12 @@ type App struct {
 }
 
 // New creates a new App instance.
-func New(logger *zap.Logger) *App {
+func New(logger *zap.Logger, logLevel zap.AtomicLevel) *App {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	a := &App{
 		logger:         logger,
+		logLevel:       logLevel,
 		ctx:            ctx,
 		cancel:         cancel,
 		lastStatus:     "Idle",
@@ -148,6 +150,9 @@ func (a *App) loadSettingsFromDB() {
 	}
 	if v, ok := config["log_level"]; ok && v != "" {
 		a.appSettings.LogLevel = v
+		// Apply saved log level at startup
+		a.applyLogLevel(v)
+		a.logger.Info("Loaded log level from settings", zap.String("level", v))
 	}
 	if v, ok := config["sync_interval"]; ok && v != "" {
 		a.appSettings.SyncInterval = v

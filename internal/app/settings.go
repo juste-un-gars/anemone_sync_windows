@@ -226,7 +226,7 @@ func (sw *SettingsWindow) createGeneralTab() fyne.CanvasObject {
 	// Log level
 	logLevelLabel := widget.NewLabel("Log Level:")
 	currentLogLevel := sw.app.GetLogLevel()
-	logLevelSelect := widget.NewSelect([]string{"Debug", "Info", "Warning", "Error"}, func(selected string) {
+	logLevelSelect := widget.NewSelect([]string{"Debug", "Info", "Warning", "Error", "Off"}, func(selected string) {
 		if selected != sw.app.GetLogLevel() {
 			sw.app.SetLogLevel(selected)
 		}

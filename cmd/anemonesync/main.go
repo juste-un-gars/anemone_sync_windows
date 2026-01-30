@@ -9,11 +9,12 @@ import (
 	"github.com/juste-un-gars/anemone_sync_windows/internal/app"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 func main() {
-	// Initialize logger
-	logger := initLogger()
+	// Initialize logger with dynamic level support
+	logger, logLevel := initLogger()
 	defer logger.Sync()
 
 	// Check CLI mode first
@@ -39,32 +40,58 @@ func main() {
 	}
 
 	// Create and run application
-	application := app.New(logger)
+	application := app.New(logger, logLevel)
 	application.SetAutoStartMode(isAutoStart)
 	application.Run()
 }
 
-// initLogger creates a configured zap logger.
-func initLogger() *zap.Logger {
-	// Development config for now - switch to production later
-	config := zap.NewDevelopmentConfig()
+// initLogger creates a configured zap logger with a dynamic log level and file rotation.
+// Returns the logger and the AtomicLevel for runtime level changes.
+func initLogger() (*zap.Logger, zap.AtomicLevel) {
+	// Dynamic log level (default: Info, can be changed at runtime)
+	atomicLevel := zap.NewAtomicLevelAt(zapcore.InfoLevel)
 
-	// Log to file in user's app data directory
+	// Encoder config for human-readable output
+	encoderConfig := zap.NewDevelopmentEncoderConfig()
+	encoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+
+	// Console encoder for stdout
+	consoleEncoder := zapcore.NewConsoleEncoder(encoderConfig)
+
+	// Create cores: stdout + file with rotation
+	var cores []zapcore.Core
+
+	// Always log to stdout
+	cores = append(cores, zapcore.NewCore(
+		consoleEncoder,
+		zapcore.AddSync(os.Stdout),
+		atomicLevel,
+	))
+
+	// Log to file with rotation (lumberjack)
 	logPath := getLogPath()
 	if logPath != "" {
-		config.OutputPaths = []string{"stdout", logPath}
+		fileWriter := &lumberjack.Logger{
+			Filename:   logPath,
+			MaxSize:    10,   // 10 MB max before rotation
+			MaxBackups: 10,   // Keep 10 old files
+			MaxAge:     30,   // Delete files older than 30 days
+			Compress:   true, // Compress rotated files (.gz)
+		}
+		cores = append(cores, zapcore.NewCore(
+			consoleEncoder,
+			zapcore.AddSync(fileWriter),
+			atomicLevel,
+		))
 	}
 
-	// Set log level
-	config.Level = zap.NewAtomicLevelAt(zapcore.DebugLevel)
+	// Combine cores
+	core := zapcore.NewTee(cores...)
 
-	logger, err := config.Build()
-	if err != nil {
-		// Fallback to basic logger
-		logger, _ = zap.NewDevelopment()
-	}
+	// Build logger with caller info
+	logger := zap.New(core, zap.AddCaller(), zap.AddStacktrace(zapcore.ErrorLevel))
 
-	return logger
+	return logger, atomicLevel
 }
 
 // getLogPath returns the path for the log file.

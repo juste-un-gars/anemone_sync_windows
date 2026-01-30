@@ -3,6 +3,7 @@ package app
 import (
 	"github.com/juste-un-gars/anemone_sync_windows/internal/smb"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 // --- UI ---
@@ -97,18 +98,54 @@ func (a *App) SetNotificationsEnabled(enabled bool) {
 	a.logger.Info("Notifications setting changed", zap.Bool("enabled", enabled))
 }
 
-// SetLogLevel changes the logging level.
+// SetLogLevel changes the logging level dynamically.
 func (a *App) SetLogLevel(level string) {
 	a.mu.Lock()
+	oldLevel := a.appSettings.LogLevel
 	a.appSettings.LogLevel = level
 	a.mu.Unlock()
+
+	// Temporarily enable logging to show the change message (even from Off)
+	if oldLevel == "Off" || oldLevel == "Error" {
+		a.logLevel.SetLevel(zapcore.WarnLevel)
+	}
+
+	// Log the change
+	a.logger.Warn("Log level changed", zap.String("from", oldLevel), zap.String("to", level))
+
+	// Apply the actual new level
+	a.applyLogLevel(level)
 
 	// Persist to database
 	if a.db != nil {
 		a.db.SetAppConfig("log_level", level, "string")
 	}
+}
 
-	a.logger.Info("Log level changed", zap.String("level", level))
+// applyLogLevel applies the log level string to the zap AtomicLevel.
+func (a *App) applyLogLevel(level string) {
+	if a.logLevel == (zap.AtomicLevel{}) {
+		return
+	}
+
+	var zapLevel zapcore.Level
+	switch level {
+	case "Debug":
+		zapLevel = zapcore.DebugLevel
+	case "Info":
+		zapLevel = zapcore.InfoLevel
+	case "Warning":
+		zapLevel = zapcore.WarnLevel
+	case "Error":
+		zapLevel = zapcore.ErrorLevel
+	case "Off":
+		// Level higher than Fatal disables all logging
+		zapLevel = zapcore.FatalLevel + 1
+	default:
+		zapLevel = zapcore.InfoLevel
+	}
+
+	a.logLevel.SetLevel(zapLevel)
 }
 
 // SetSyncInterval changes the auto-sync interval.

@@ -106,30 +106,62 @@ Waiting for your validation before continuing.
 
 ### Logging Standards (Go/Zap)
 
-**Goal: Comprehensive, configurable logging for debugging and monitoring.**
+**Goal: Comprehensive, configurable logging for debugging, auditing, and monitoring.**
 
-This project uses `go.uber.org/zap` for structured logging.
+This project uses `go.uber.org/zap` for structured logging with `lumberjack` for rotation.
 
-**Log Levels:**
+**Log Levels (configurable from UI or CLI):**
 ```
-DEBUG   - Verbose details (dev only)
-INFO    - Normal operations (sync started, file downloaded)
+DEBUG   - Verbose details (dev only, very noisy)
+INFO    - Normal operations (sync started, file downloaded) [DEFAULT]
 WARN    - Suspicious behavior (connection retry, timeout)
 ERROR   - Handled errors (connection failed, file not found)
 FATAL   - Unrecoverable errors (app crash)
 ```
+
+**Log Location:**
+```
+%LOCALAPPDATA%\AnemoneSync\logs\
+├── anemonesync.log           <- Current (active)
+├── anemonesync-2026-01-29.log.gz   <- Rotated (compressed)
+├── anemonesync-2026-01-28.log.gz
+└── ... (max 10 files)
+```
+
+**Rotation Configuration (lumberjack):**
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| MaxSize | 10 MB | Rotate when file exceeds this size |
+| MaxBackups | 10 | Keep last N rotated files |
+| MaxAge | 30 days | Delete files older than this |
+| Compress | true | Compress rotated files (.gz) |
 
 **What to Log:**
 - Sync operations (start, progress, complete)
 - SMB connections (connect, disconnect, errors)
 - File operations (download, upload, delete)
 - Cloud Files callbacks (hydration, dehydration)
-- Errors with context
+- Auth events (credential load, keyring access)
+- Errors with full context (zap.Error, zap.String, etc.)
 
-**NEVER Log:**
-- Passwords, credentials, tokens
-- Full file contents
-- Personal data
+**NEVER Log (Security Critical):**
+- Passwords, credentials, tokens, API keys
+- Full file contents or sensitive paths
+- Personal data (usernames in logs OK, passwords NEVER)
+- Database connection strings with credentials
+
+**Production vs Development:**
+| Setting | Development | Production |
+|---------|-------------|------------|
+| Log Level | DEBUG | INFO or WARN |
+| Output | Console + File | File only |
+| Format | Human-readable | Structured |
+
+**Logging Security Checklist:**
+- [ ] No secrets in logs (grep for "password", "token", "key")
+- [ ] Log files not world-readable (Windows ACLs)
+- [ ] Rotation configured (max size + max files)
+- [ ] Old logs cleaned up automatically
 
 ### Development Order (Enforce)
 
@@ -407,8 +439,11 @@ govulncheck ./...
 - [ ] No passwords, tokens, API keys, secrets in logs
 - [ ] No personal IDs or sensitive data in logs
 - [ ] Session tokens not logged (only hash/ID if needed)
-- [ ] Log files not publicly accessible
-- [ ] Log rotation configured
+- [ ] Log files not world-readable (proper ACLs/permissions)
+- [ ] Log rotation configured (max size + max files)
+- [ ] Old logs cleaned up automatically
+- [ ] Production uses INFO or WARN level (not DEBUG)
+- [ ] Security events are logged (auth failures, access errors)
 
 ### Audit Report Template
 
@@ -532,5 +567,5 @@ export PATH="/c/msys64/mingw64/bin:$PATH" && go build -o testharness.exe ./test/
 
 ---
 
-**Last Updated:** 2026-01-29
-**Version:** 3.3.0
+**Last Updated:** 2026-01-30
+**Version:** 3.4.0
