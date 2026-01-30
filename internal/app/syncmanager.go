@@ -324,13 +324,6 @@ func (m *SyncManager) createProgressCallback(job *SyncJob) syncpkg.ProgressCallb
 
 		m.app.SetStatus(status)
 
-		m.logger.Info("Sync progress update",
-			zap.String("status", status),
-			zap.String("phase", progress.Phase),
-			zap.Int("processed", progress.FilesProcessed),
-			zap.Int("total", progress.FilesTotal),
-		)
-
 		m.logger.Debug("Sync progress",
 			zap.String("job", job.Name),
 			zap.String("phase", progress.Phase),

@@ -251,6 +251,17 @@ func (a *App) Run() {
 // Quit triggers application shutdown.
 func (a *App) Quit() {
 	a.logger.Info("Quit requested")
+
+	// Close settings window first to prevent GLFW crash
+	// Must use fyne.Do() as Quit may be called from systray thread
+	if a.settings != nil && a.settings.window != nil {
+		fyne.Do(func() {
+			if a.settings != nil && a.settings.window != nil {
+				a.settings.window.Close()
+			}
+		})
+	}
+
 	if a.fyneApp != nil {
 		a.fyneApp.Quit()
 	}
@@ -288,10 +299,8 @@ func (a *App) shutdown() {
 	// Wait for workers to finish
 	a.wg.Wait()
 
-	// Close settings window if open
-	if a.settings != nil {
-		a.settings.Close()
-	}
+	// Note: Settings window is closed in Quit() before fyneApp.Quit()
+	// Don't try to close it here as GLFW is already terminated
 
 	// Close database
 	if a.db != nil {
