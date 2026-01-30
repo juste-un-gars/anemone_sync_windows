@@ -2,9 +2,9 @@
 
 Ce fichier contient un index court de chaque session. Les details sont dans `sessions/session_XXX.md`.
 
-**Derniere session**: 068 (2026-01-30)
-**Phase en cours**: Tests resilience + Upload atomique
-**Prochaine etape**: Ameliorations UX (notifications, icones status)
+**Derniere session**: 070 (2026-01-30)
+**Phase en cours**: Tests et corrections sync
+**Prochaine etape**: Tests additionnels, documentation
 
 ---
 
@@ -280,9 +280,18 @@ Ce fichier contient un index court de chaque session. Les details sont dans `ses
 **Status**: Done | **Phase**: Tests resilience + Upload atomique
 **Resume**: Fix upload interrompu (atomic upload .anemone-uploading), cleanup orphelins, TEST7 harness
 
+## Session 069 - 2026-01-30
+**Status**: Done | **Phase**: Améliorations UX
+**Resume**: Icônes systray dynamiques (badges colorés), tooltip, progress détaillé (fichiers + taille) | **Commit**: 2d2bf75
+
+## Session 070 - 2026-01-30
+**Status**: Done | **Phase**: Fix sync + Tests
+**Resume**: Fix suppression locale non propagée au serveur (filesAreSame/filesContentSame), tests 27/29 | **Commit**: f87cbc2
+
 ---
 
 ## Prochaines etapes
 
 1. [x] Tests avances: serveur offline, interruption reseau
-2. [ ] Ameliorations UX (notifications, icones status)
+2. [x] Ameliorations UX (notifications, icones status)
+3. [x] Fix bug suppression locale
