@@ -110,32 +110,28 @@ func (cd *ChangeDetector) decide3Way(local, remote, cached *FileInfo) (SyncActio
 
 	// Case 3: File was deleted locally but exists remotely
 	if !localExists && remoteExists && cachedExists {
-		// Check if remote file is re-created (same content, newer timestamp)
-		// This handles the case where file was deleted then re-added on remote
-		if cd.isFileRecreated(remote, cached) {
-			return ActionDownload, "file re-created remotely after local deletion"
-		}
-		if cd.filesAreSame(remote, cached) {
+		// For deletion case, use content-only comparison (ignore mtime)
+		// Remote files often don't have hash, and mtime can differ due to
+		// filesystem precision, timezone issues, or server-side operations
+		if cd.filesContentSame(remote, cached) {
 			// Remote unchanged since last sync, local deleted - delete remote
 			return ActionDeleteRemote, "file deleted locally, remove from remote"
 		}
-		// Remote changed (different content), local deleted - conflict
+		// Remote content changed (different size), local deleted - conflict
 		return ActionConflict, "file deleted locally but modified remotely"
 	}
 
 	// Case 4: File exists locally but deleted remotely
 	if localExists && !remoteExists && cachedExists {
-		// Check if local file is re-created (same content, newer timestamp)
-		// This handles the case where file was deleted then re-added locally
-		if cd.isFileRecreated(local, cached) {
-			return ActionUpload, "file re-created locally after remote deletion"
-		}
-		if cd.filesAreSame(local, cached) {
+		// Use content comparison - if local content matches cache, remote deletion propagates
+		// If local content differs (modified), we have a conflict
+		if cd.filesContentSame(local, cached) {
 			// Local unchanged since last sync, remote deleted - delete local
 			return ActionDeleteLocal, "file deleted remotely, remove local copy"
 		}
-		// Local changed (different content), remote deleted - conflict
-		return ActionConflict, "file modified locally but deleted remotely"
+		// Local content changed, remote deleted - upload the modified file
+		// (User modified locally, so their intent is to keep the file)
+		return ActionUpload, "file modified locally after remote deletion"
 	}
 
 	// Case 5: File deleted on both sides
@@ -176,9 +172,11 @@ func (cd *ChangeDetector) decide3Way(local, remote, cached *FileInfo) (SyncActio
 }
 
 // filesAreSame checks if two files are the same
-func (cd *ChangeDetector) filesAreSame(f1, f2 *FileInfo) bool {
+// filesContentSame compares only content (size + hash if available), ignoring mtime.
+// This is used for deletion cases where mtime may differ but content is unchanged.
+func (cd *ChangeDetector) filesContentSame(f1, f2 *FileInfo) bool {
 	if f1 == nil || f2 == nil {
-		return f1 == f2 // Both nil = same, one nil = different
+		return f1 == f2
 	}
 
 	// Size must match
@@ -191,7 +189,39 @@ func (cd *ChangeDetector) filesAreSame(f1, f2 *FileInfo) bool {
 		return f1.Hash == f2.Hash
 	}
 
-	// If no hashes available, compare size and mtime (less reliable)
+	// No hash available - consider same if size matches
+	// This is acceptable for deletion cases because:
+	// - Remote files often don't have hash (would require download)
+	// - Size match is a reasonable indicator of unchanged content
+	return true
+}
+
+func (cd *ChangeDetector) filesAreSame(f1, f2 *FileInfo) bool {
+	if f1 == nil || f2 == nil {
+		return f1 == f2 // Both nil = same, one nil = different
+	}
+
+	// Size must match
+	if f1.Size != f2.Size {
+		return false
+	}
+
+	// If both have hashes, compare them (most reliable)
+	if f1.Hash != "" && f2.Hash != "" {
+		return f1.Hash == f2.Hash
+	}
+
+	// If only one has a hash, we can't reliably compare content
+	// In this case, consider files "same" if size matches
+	// This typically happens when comparing local (has hash) with remote (no hash)
+	// The cache stores local file info, but we're comparing with remote
+	// Without remote hash, we can't know if remote content changed
+	if f1.Hash != "" || f2.Hash != "" {
+		// One has hash, one doesn't - use size only
+		return true // Size already matched above
+	}
+
+	// Neither has hash - compare size and mtime (fallback)
 	// Truncate to second precision for filesystem compatibility
 	return f1.MTime.Truncate(time.Second).Equal(f2.MTime.Truncate(time.Second))
 }

@@ -61,3 +61,8 @@ temp/
 
 # Session files (keep structure, ignore content if sensitive)
 # sessions/*.md
+
+# Test harness data (contains credentials)
+*/_harness/
+D:/TEST/
+testharness.exe
