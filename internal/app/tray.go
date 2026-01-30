@@ -1,11 +1,19 @@
 package app
 
 import (
+	"strings"
 	"sync"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/driver/desktop"
+	"fyne.io/systray"
+	"go.uber.org/zap"
 )
+
+// containsIgnoreCase checks if s contains substr (case-insensitive).
+func containsIgnoreCase(s, substr string) bool {
+	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
+}
 
 // Tray manages the system tray icon and menu using Fyne's desktop driver.
 type Tray struct {
@@ -21,6 +29,10 @@ type Tray struct {
 	syncShutdownMenu    *fyne.MenuItem
 	cancelShutdownItem  *fyne.MenuItem
 	freeSpaceMenu       *fyne.MenuItem
+
+	// Dynamic icons for different states
+	icons     *trayIcons
+	iconState TrayIconState
 }
 
 // NewTray creates a new Tray instance.
@@ -97,16 +109,30 @@ func (t *Tray) Setup() {
 		quitItem,
 	)
 
-	// Set system tray icon and menu
-	iconResource := fyne.NewStaticResource("icon.png", iconData)
-	t.desktopApp.SetSystemTrayIcon(iconResource)
+	// Generate icon variants with status badges
+	var err error
+	t.icons, err = generateTrayIcons(iconData)
+	if err != nil {
+		t.app.Logger().Warn("Failed to generate tray icons, using default",
+			zap.Error(err))
+		// Fallback to basic icon
+		iconResource := fyne.NewStaticResource("icon.png", iconData)
+		t.desktopApp.SetSystemTrayIcon(iconResource)
+	} else {
+		// Start with normal icon
+		t.desktopApp.SetSystemTrayIcon(t.icons.normal)
+		t.iconState = TrayIconNormal
+	}
 	t.desktopApp.SetSystemTrayMenu(t.menu)
+
+	// Set initial tooltip
+	systray.SetTooltip("AnemoneSync - Idle")
 
 	t.ready = true
 	t.app.Logger().Debug("System tray ready")
 }
 
-// UpdateStatus updates the status display in the tray menu.
+// UpdateStatus updates the status display in the tray menu and icon.
 func (t *Tray) UpdateStatus() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -128,6 +154,48 @@ func (t *Tray) UpdateStatus() {
 	}
 
 	t.menu.Refresh()
+
+	// Update tooltip with current status
+	systray.SetTooltip("AnemoneSync - " + status)
+
+	// Update tray icon based on status
+	t.updateIconForStatus(status, isSyncing)
+}
+
+// updateIconForStatus sets the tray icon based on current status.
+// Must be called with t.mu held.
+func (t *Tray) updateIconForStatus(status string, isSyncing bool) {
+	if t.icons == nil || t.desktopApp == nil {
+		return
+	}
+
+	var newState TrayIconState
+
+	if isSyncing {
+		newState = TrayIconSyncing
+	} else if containsIgnoreCase(status, "failed") || containsIgnoreCase(status, "error") {
+		newState = TrayIconError
+	} else if containsIgnoreCase(status, "partial") {
+		newState = TrayIconWarning
+	} else {
+		newState = TrayIconNormal
+	}
+
+	if t.iconState != newState {
+		t.iconState = newState
+		var icon fyne.Resource
+		switch newState {
+		case TrayIconSyncing:
+			icon = t.icons.syncing
+		case TrayIconError:
+			icon = t.icons.error
+		case TrayIconWarning:
+			icon = t.icons.warning
+		default:
+			icon = t.icons.normal
+		}
+		t.desktopApp.SetSystemTrayIcon(icon)
+	}
 }
 
 // SetSyncEnabled enables/disables the sync menu item.
@@ -283,4 +351,42 @@ func (t *Tray) RefreshFreeSpaceMenu() {
 	}
 
 	t.menu.Refresh()
+}
+
+// SetIconState changes the tray icon based on the current state.
+func (t *Tray) SetIconState(state TrayIconState) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if !t.ready || t.icons == nil || t.desktopApp == nil {
+		return
+	}
+
+	// Skip if already in this state
+	if t.iconState == state {
+		return
+	}
+
+	t.iconState = state
+
+	var icon fyne.Resource
+	switch state {
+	case TrayIconSyncing:
+		icon = t.icons.syncing
+	case TrayIconError:
+		icon = t.icons.error
+	case TrayIconWarning:
+		icon = t.icons.warning
+	default:
+		icon = t.icons.normal
+	}
+
+	t.desktopApp.SetSystemTrayIcon(icon)
+}
+
+// GetIconState returns the current tray icon state.
+func (t *Tray) GetIconState() TrayIconState {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.iconState
 }

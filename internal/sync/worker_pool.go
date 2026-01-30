@@ -273,6 +273,16 @@ func ExecuteParallel(
 	}
 	defer pool.Stop()
 
+	// Calculate total bytes to transfer for progress reporting
+	var bytesTotal int64
+	for _, d := range decisions {
+		if d.Action == cache.ActionUpload && d.LocalInfo != nil {
+			bytesTotal += d.LocalInfo.Size
+		} else if d.Action == cache.ActionDownload && d.RemoteInfo != nil {
+			bytesTotal += d.RemoteInfo.Size
+		}
+	}
+
 	// Launch result collector goroutine
 	actions := make([]*SyncAction, len(decisions))
 	var collectorWg sync.WaitGroup
@@ -302,6 +312,7 @@ func ExecuteParallel(
 					FilesProcessed:   completed,
 					FilesTotal:       len(decisions),
 					BytesTransferred: bytesTransferred,
+					BytesTotal:       bytesTotal,
 					Percentage:       35 + float64(completed)/float64(len(decisions))*60, // 35-95%
 				})
 			}

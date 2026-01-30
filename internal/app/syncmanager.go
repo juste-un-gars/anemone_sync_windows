@@ -315,12 +315,7 @@ func (m *SyncManager) createProgressCallback(job *SyncJob) syncpkg.ProgressCallb
 		case "detecting":
 			status = fmt.Sprintf("Detecting changes in %s...", job.Name)
 		case "executing":
-			if progress.FilesTotal > 0 {
-				status = fmt.Sprintf("Syncing %s (%d/%d)",
-					job.Name, progress.FilesProcessed, progress.FilesTotal)
-			} else {
-				status = fmt.Sprintf("Syncing %s...", job.Name)
-			}
+			status = formatSyncProgress(job.Name, progress)
 		case "finalizing":
 			status = fmt.Sprintf("Finalizing %s...", job.Name)
 		default:
@@ -329,15 +324,44 @@ func (m *SyncManager) createProgressCallback(job *SyncJob) syncpkg.ProgressCallb
 
 		m.app.SetStatus(status)
 
+		m.logger.Info("Sync progress update",
+			zap.String("status", status),
+			zap.String("phase", progress.Phase),
+			zap.Int("processed", progress.FilesProcessed),
+			zap.Int("total", progress.FilesTotal),
+		)
+
 		m.logger.Debug("Sync progress",
 			zap.String("job", job.Name),
 			zap.String("phase", progress.Phase),
 			zap.Float64("percent", progress.Percentage),
 			zap.Int("processed", progress.FilesProcessed),
 			zap.Int("total", progress.FilesTotal),
+			zap.Int64("bytes", progress.BytesTransferred),
+			zap.Int64("bytesTotal", progress.BytesTotal),
 		)
 	}
 }
+
+// formatSyncProgress formats the sync progress for display.
+func formatSyncProgress(jobName string, p *syncpkg.SyncProgress) string {
+	if p.FilesTotal == 0 {
+		return fmt.Sprintf("Syncing %s...", jobName)
+	}
+
+	// Build progress string with files count
+	filesPart := fmt.Sprintf("%d/%d files", p.FilesProcessed, p.FilesTotal)
+
+	// Add bytes if available
+	if p.BytesTotal > 0 {
+		transferred := formatBytes(p.BytesTransferred)
+		total := formatBytes(p.BytesTotal)
+		return fmt.Sprintf("Syncing %s: %s (%s/%s)", jobName, filesPart, transferred, total)
+	}
+
+	return fmt.Sprintf("Syncing %s: %s", jobName, filesPart)
+}
+
 
 // updateJobStatus updates the job's status in memory.
 func (m *SyncManager) updateJobStatus(job *SyncJob, status JobStatus) {

@@ -84,6 +84,16 @@ func (ex *Executor) Execute(
 	actions := make([]*SyncAction, 0, len(decisions))
 	var bytesTransferred int64
 
+	// Calculate total bytes to transfer for progress reporting
+	var bytesTotal int64
+	for _, d := range decisions {
+		if d.Action == cache.ActionUpload && d.LocalInfo != nil {
+			bytesTotal += d.LocalInfo.Size
+		} else if d.Action == cache.ActionDownload && d.RemoteInfo != nil {
+			bytesTotal += d.RemoteInfo.Size
+		}
+	}
+
 	// Execute actions sequentially
 	for i, decision := range decisions {
 		// Check context cancellation
@@ -105,6 +115,7 @@ func (ex *Executor) Execute(
 				FilesProcessed:   i,
 				FilesTotal:       len(decisions),
 				BytesTransferred: bytesTransferred,
+				BytesTotal:       bytesTotal,
 				CurrentAction:    fmt.Sprintf("%s: %s", decision.Action, decision.LocalPath),
 				Percentage:       35 + float64(i)/float64(len(decisions))*60, // 35-95%
 			})

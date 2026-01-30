@@ -348,14 +348,14 @@ func (a *App) startWorkers() {
 	// Start size calculator
 	a.startSizeUpdater()
 
-	// Trigger sync on startup if launched via autostart
+	// Trigger sync on startup for:
+	// - Jobs with SyncOnStartup enabled (only when launched via autostart)
+	// - Jobs with FilesOnDemand enabled (always, to detect new/changed files on server)
 	// Delay slightly to let systray fully initialize
-	if a.isAutoStart {
-		go func() {
-			time.Sleep(2 * time.Second)
-			a.triggerStartupSync()
-		}()
-	}
+	go func() {
+		time.Sleep(2 * time.Second)
+		a.triggerStartupSync(a.isAutoStart)
+	}()
 }
 
 // reconnectCloudFilesProviders reconnects Cloud Files providers for jobs that have
@@ -396,8 +396,10 @@ func (a *App) reconnectCloudFilesProviders() {
 	}
 }
 
-// triggerStartupSync syncs all jobs that have SyncOnStartup enabled.
-func (a *App) triggerStartupSync() {
+// triggerStartupSync syncs jobs based on their configuration.
+// - SyncOnStartup jobs: only synced if isAutoStart is true (launched via Windows autostart)
+// - FilesOnDemand jobs: always synced to detect new/changed files on server
+func (a *App) triggerStartupSync(isAutoStart bool) {
 	a.mu.RLock()
 	jobs := make([]*SyncJob, len(a.syncJobs))
 	copy(jobs, a.syncJobs)
@@ -405,7 +407,12 @@ func (a *App) triggerStartupSync() {
 
 	startupJobs := make([]*SyncJob, 0)
 	for _, job := range jobs {
-		if job.Enabled && job.SyncOnStartup {
+		if !job.Enabled {
+			continue
+		}
+		// FilesOnDemand: always sync at startup (need to detect server changes)
+		// SyncOnStartup: only sync if launched via autostart
+		if job.FilesOnDemand || (job.SyncOnStartup && isAutoStart) {
 			startupJobs = append(startupJobs, job)
 		}
 	}
