@@ -6,6 +6,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
@@ -243,6 +244,84 @@ func (sw *SettingsWindow) createGeneralTab() fyne.CanvasObject {
 	})
 	intervalSelect.SetSelected(currentInterval)
 
+	// Export/Import configuration
+	jsonFilter := storage.NewExtensionFileFilter([]string{".json"})
+
+	exportBtn := widget.NewButtonWithIcon("Export Configuration", theme.DocumentSaveIcon(), func() {
+		d := dialog.NewFileSave(func(writer fyne.URIWriteCloser, err error) {
+			if err != nil {
+				dialog.ShowError(err, sw.window)
+				return
+			}
+			if writer == nil {
+				return // cancelled
+			}
+			path := writer.URI().Path()
+			writer.Close()
+
+			if exportErr := sw.app.ExportConfig(path); exportErr != nil {
+				dialog.ShowError(exportErr, sw.window)
+			} else {
+				dialog.ShowInformation("Export Complete",
+					"Configuration exported successfully.\n\nNote: SMB passwords are NOT included.\nYou will need to re-enter them after import.",
+					sw.window)
+			}
+		}, sw.window)
+		d.SetFileName("anemonesync-config.json")
+		d.SetFilter(jsonFilter)
+		d.Show()
+	})
+
+	importBtn := widget.NewButtonWithIcon("Import Configuration", theme.FolderOpenIcon(), func() {
+		d := dialog.NewFileOpen(func(reader fyne.URIReadCloser, err error) {
+			if err != nil {
+				dialog.ShowError(err, sw.window)
+				return
+			}
+			if reader == nil {
+				return // cancelled
+			}
+			path := reader.URI().Path()
+			reader.Close()
+
+			dialog.ShowConfirm("Import Configuration",
+				"Import configuration from this file?\n\nExisting servers and jobs with the same settings will be kept.\nNew items will be added.",
+				func(confirmed bool) {
+					if !confirmed {
+						return
+					}
+					result, importErr := sw.app.ImportConfig(path)
+					if importErr != nil {
+						dialog.ShowError(importErr, sw.window)
+						return
+					}
+
+					msg := fmt.Sprintf("Import complete:\n\n"+
+						"Servers: %d imported, %d skipped (already exist)\n"+
+						"Jobs: %d imported, %d skipped (already exist)\n"+
+						"Exclusions: %d imported, %d skipped\n"+
+						"Settings: %d keys imported\n\n"+
+						"Please re-enter your SMB passwords in the server settings.",
+						result.ServersImported, result.ServersSkipped,
+						result.JobsImported, result.JobsSkipped,
+						result.ExclusionsImported, result.ExclusionsSkipped,
+						result.ConfigKeysImported)
+					dialog.ShowInformation("Import Complete", msg, sw.window)
+
+					// Refresh lists
+					if sw.smbList != nil {
+						sw.smbList.Refresh()
+					}
+					if sw.jobsList != nil {
+						sw.jobsList.Refresh()
+					}
+				},
+				sw.window)
+		}, sw.window)
+		d.SetFilter(jsonFilter)
+		d.Show()
+	})
+
 	form := container.NewVBox(
 		widget.NewLabel("Startup"),
 		autoStartCheck,
@@ -255,6 +334,9 @@ func (sw *SettingsWindow) createGeneralTab() fyne.CanvasObject {
 		widget.NewSeparator(),
 		widget.NewLabel("Synchronization"),
 		container.NewHBox(intervalLabel, intervalSelect),
+		widget.NewSeparator(),
+		widget.NewLabel("Backup / Restore"),
+		container.NewHBox(exportBtn, importBtn),
 	)
 
 	return container.NewVScroll(form)

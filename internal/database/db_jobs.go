@@ -387,6 +387,64 @@ func (db *DB) GetExclusions(jobID int64) ([]*Exclusion, error) {
 	return exclusions, nil
 }
 
+// GetAllExclusions retrieves all exclusions (global + job-specific) without filtering.
+func (db *DB) GetAllExclusions() ([]*Exclusion, error) {
+	rows, err := db.conn.Query(`
+		SELECT id, type, pattern_or_path, reason, date_added, job_id, created_at
+		FROM exclusions
+		ORDER BY type DESC, id ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("query all exclusions: %w", err)
+	}
+	defer rows.Close()
+
+	var exclusions []*Exclusion
+	for rows.Next() {
+		var excl Exclusion
+		err := rows.Scan(
+			&excl.ID,
+			&excl.Type,
+			&excl.PatternOrPath,
+			&excl.Reason,
+			&excl.DateAdded,
+			&excl.JobID,
+			&excl.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan exclusion: %w", err)
+		}
+		exclusions = append(exclusions, &excl)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate exclusions: %w", err)
+	}
+
+	return exclusions, nil
+}
+
+// CreateExclusion inserts a new exclusion rule.
+func (db *DB) CreateExclusion(excl *Exclusion) error {
+	now := time.Now().Unix()
+	result, err := db.conn.Exec(`
+		INSERT INTO exclusions (type, pattern_or_path, reason, date_added, job_id, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, excl.Type, excl.PatternOrPath, excl.Reason, now, excl.JobID, now)
+	if err != nil {
+		return fmt.Errorf("insert exclusion: %w", err)
+	}
+
+	id, err := result.LastInsertId()
+	if err != nil {
+		return fmt.Errorf("get last insert id: %w", err)
+	}
+
+	excl.ID = id
+	excl.CreatedAt = time.Unix(now, 0)
+	return nil
+}
+
 // GetIndividualExclusions retrieves individual path exclusions for a job
 func (db *DB) GetIndividualExclusions(jobID int64) (map[string]bool, error) {
 	rows, err := db.conn.Query(`

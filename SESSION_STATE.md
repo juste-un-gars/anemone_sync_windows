@@ -2,8 +2,8 @@
 
 Ce fichier contient un index court de chaque session. Les details sont dans `sessions/session_XXX.md`.
 
-**Derniere session**: 070 (2026-01-30)
-**Phase en cours**: Stable - tous bugs connus corriges
+**Derniere session**: 071 (2026-02-12)
+**Phase en cours**: Stable - premiere release GitHub
 **Prochaine etape**: Tests utilisateur en conditions reelles
 
 ---
@@ -287,6 +287,10 @@ Ce fichier contient un index court de chaque session. Les details sont dans `ses
 ## Session 070 - 2026-01-30
 **Status**: Done | **Phase**: Fix sync + Tests + Bugfixes
 **Resume**: Fix suppression locale (filesContentSame), fix crash GLFW quit, fix log verbeux, tests 27/29 (93%) | **Commits**: f87cbc2, f8f9e79
+
+## Session 071 - 2026-02-12
+**Status**: Done | **Phase**: Config Export/Import + Release
+**Resume**: Export/import config JSON (sans passwords), boutons Settings, premiere release GitHub v0.1.0-dev
 
 ---
 
