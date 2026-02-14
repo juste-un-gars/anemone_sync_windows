@@ -40,6 +40,13 @@ build:
 	GOOS=windows GOARCH=amd64 $(GO) build $(GOFLAGS) -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/windows/$(APP_NAME).exe cmd/smbsync/main.go
 	@echo "$(GREEN)✓ Build terminé: $(BUILD_DIR)/windows/$(APP_NAME).exe$(NC)"
 
+## build-cleanup: Compile l'outil anemone-cleanup (Windows, pas de CGO)
+build-cleanup:
+	@echo "$(CYAN)Compilation de anemone-cleanup (Windows)...$(NC)"
+	@mkdir -p $(BUILD_DIR)/windows
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 $(GO) build $(GOFLAGS) -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/windows/anemone-cleanup.exe ./cmd/anemone-cleanup/
+	@echo "$(GREEN)✓ Build terminé: $(BUILD_DIR)/windows/anemone-cleanup.exe$(NC)"
+
 ## build-all: Compile pour toutes les plateformes
 build-all:
 	@echo "$(CYAN)Compilation multi-plateforme...$(NC)"
