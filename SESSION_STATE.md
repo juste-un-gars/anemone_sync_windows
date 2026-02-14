@@ -2,8 +2,8 @@
 
 Ce fichier contient un index court de chaque session. Les details sont dans `sessions/session_XXX.md`.
 
-**Derniere session**: 071 (2026-02-12)
-**Phase en cours**: Stable - premiere release GitHub
+**Derniere session**: 072 (2026-02-14)
+**Phase en cours**: Stable - release v0.1.1-dev
 **Prochaine etape**: Tests utilisateur en conditions reelles
 
 ---
@@ -292,6 +292,10 @@ Ce fichier contient un index court de chaque session. Les details sont dans `ses
 **Status**: Done | **Phase**: Config Export/Import + Release
 **Resume**: Export/import config JSON (sans passwords), boutons Settings, premiere release GitHub v0.1.0-dev
 
+## Session 072 - 2026-02-14
+**Status**: Done | **Phase**: Outil anemone-cleanup
+**Resume**: Outil standalone cleanup placeholders corrompus, test OK (2701 fichiers), release v0.1.1-dev | **Commit**: 2cb7296
+
 ---
 
 ## Prochaines etapes
@@ -300,4 +304,6 @@ Ce fichier contient un index court de chaque session. Les details sont dans `ses
 2. [x] Ameliorations UX (notifications, icones status)
 3. [x] Fix bug suppression locale
 4. [x] Fix crash GLFW fermeture avec Settings ouvert
-5. [ ] Tests utilisateur en conditions réelles
+5. [x] Outil anemone-cleanup (placeholders corrompus)
+6. [ ] Tests utilisateur en conditions reelles
+7. [ ] Cloud Files API dehydration (Free Up Space)
