@@ -298,7 +298,7 @@ Ce fichier contient un index court de chaque session. Les details sont dans `ses
 
 ## Session 073 - 2026-02-15
 **Status**: Done | **Phase**: Fix Cloud Files critique
-**Resume**: Fix hydratation massive (scanner hashait placeholders), fix ACK_DATA incorrect, reconnexion SMB auto, release v0.1.2-dev | **Commit**: 1b39528
+**Resume**: Fix hydratation massive (scanner hashait placeholders), fix ACK_DATA incorrect, reconnexion SMB auto, tests OK, release v0.1.2-dev | **Commits**: 1b39528, d573984
 
 ---
 

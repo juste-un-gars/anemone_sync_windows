@@ -47,6 +47,16 @@
 - **Release**: v0.1.2-dev (remplace v0.1.1-dev défectueuse)
 - **Build flags**: `-ldflags "-s -w -H windowsgui"` (30 Mo, pas de console, pas de symboles debug)
 
+## Tests utilisateur (v0.1.2-dev)
+- Navigation dossiers: OK
+- Hydratation à la demande (ouverture fichier): OK
+- Sous-dossiers restent en mode cloud: OK
+- **Comportement attendu**: Windows Photos précharge les images adjacentes quand on en ouvre une,
+  et Explorer génère les miniatures quand on ouvre/rafraîchit un dossier → tous les fichiers images
+  du dossier courant sont hydratés. Ce n'est pas un bug, c'est le comportement normal de Cloud Files
+  (OneDrive a le même comportement mais le masque avec des miniatures pré-générées côté serveur).
+- Attribut "AL" (Archive + reparse point) sur fichiers hydratés = normal
+
 ## Handoff Notes
 - Les 2 014 fichiers avec métadonnées corrompues nécessitent `anemone-cleanup`
 - Le fix `hydration.go` (path stripping) de la session précédente est conservé (non committé avant)
