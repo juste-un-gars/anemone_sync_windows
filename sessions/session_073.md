@@ -42,6 +42,12 @@
 - **Pas d'ACK_DATA après FETCH_DATA**: Conforme à la spec Microsoft Cloud Mirror
 - **Reconnexion lazy**: Une seule tentative de reconnexion par erreur, pas de retry infini
 
+## Build & Release
+- **Commit**: 1b39528
+- **Release**: v0.1.2-dev (remplace v0.1.1-dev défectueuse)
+- **Build flags**: `-ldflags "-s -w -H windowsgui"` (30 Mo, pas de console, pas de symboles debug)
+
 ## Handoff Notes
 - Les 2 014 fichiers avec métadonnées corrompues nécessitent `anemone-cleanup`
 - Le fix `hydration.go` (path stripping) de la session précédente est conservé (non committé avant)
+- **Rappel build**: toujours `-s -w` (taille) et `-H windowsgui` (pas de CMD)
