@@ -2,9 +2,11 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/juste-un-gars/anemone_sync_windows/internal/cloudfiles"
@@ -129,28 +131,27 @@ func (m *SyncManager) getOrCreateProvider(job *SyncJob) (*cloudfiles.CloudFilesP
 
 // populatePlaceholdersAsync populates placeholders in the background.
 // This is called after provider initialization to make the folder browsable.
+// It tries the manifest first (instant), then falls back to full SMB scan.
 func (m *SyncManager) populatePlaceholdersAsync(provider *cloudfiles.CloudFilesProvider, job *SyncJob) {
 	m.logger.Info("Populating placeholders for Cloud Files provider",
 		zap.String("job", job.Name),
 		zap.String("local_path", job.LocalPath),
 	)
 
-	// Try to list files from SMB and create placeholders
-	dataSource, err := m.createSMBDataSource(job)
+	// Try manifest first (much faster than full SMB scan)
+	remoteFiles, err := m.populateFromManifest(job)
 	if err != nil {
-		m.logger.Error("Failed to create SMB data source for placeholder population",
-			zap.Error(err),
+		m.logger.Info("Manifest not available, falling back to SMB scan",
+			zap.String("reason", err.Error()),
 		)
-		return
-	}
-
-	// List files from remote
-	remoteFiles, err := dataSource.ListFiles(m.ctx)
-	if err != nil {
-		m.logger.Error("Failed to list remote files for placeholder population",
-			zap.Error(err),
-		)
-		return
+		// Fallback to full SMB scan
+		remoteFiles, err = m.populateFromSMBScan(job)
+		if err != nil {
+			m.logger.Error("Failed to list remote files for placeholder population",
+				zap.Error(err),
+			)
+			return
+		}
 	}
 
 	m.logger.Info("Creating placeholders from remote file list",
@@ -170,27 +171,153 @@ func (m *SyncManager) populatePlaceholdersAsync(provider *cloudfiles.CloudFilesP
 	)
 }
 
-// createSMBDataSource creates an SMB data source for hydration.
+// populateFromManifest reads the Anemone Server manifest and converts it to RemoteFileInfo.
+func (m *SyncManager) populateFromManifest(job *SyncJob) ([]cloudfiles.RemoteFileInfo, error) {
+	smbClient, err := smb.NewSMBClientFromKeyring(job.RemoteHost, job.RemoteShare, m.logger.Named("smb"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create SMB client: %w", err)
+	}
+	defer smbClient.Disconnect()
+
+	if err := smbClient.Connect(); err != nil {
+		return nil, fmt.Errorf("failed to connect: %w", err)
+	}
+
+	manifestReader := syncpkg.NewManifestReader(smbClient, m.logger.Named("manifest"))
+	result := manifestReader.ReadManifest(m.ctx, job.RemotePath)
+
+	if result.Error != nil {
+		return nil, fmt.Errorf("manifest error: %w", result.Error)
+	}
+	if !result.Found {
+		return nil, fmt.Errorf("no manifest found")
+	}
+
+	// Convert manifest files to cloudfiles.RemoteFileInfo
+	// Manifest paths are relative to share root; strip RemotePath prefix if set
+	manifestFiles := make([]cloudfiles.ManifestFileEntry, 0, len(result.Manifest.Files))
+	for _, f := range result.Manifest.Files {
+		relPath := f.Path
+		if job.RemotePath != "" {
+			prefix := strings.TrimPrefix(job.RemotePath, "/")
+			if strings.HasPrefix(relPath, prefix+"/") {
+				relPath = relPath[len(prefix)+1:]
+			} else {
+				continue // File not under our remote path
+			}
+		}
+		manifestFiles = append(manifestFiles, cloudfiles.ManifestFileEntry{
+			Path:  relPath,
+			Size:  f.Size,
+			MTime: f.MTime,
+			Hash:  f.Hash,
+		})
+	}
+
+	remoteFiles := cloudfiles.FromManifestFiles(manifestFiles)
+
+	m.logger.Info("Placeholders from manifest",
+		zap.Int("file_count", len(remoteFiles)),
+		zap.Duration("manifest_read", result.Duration),
+	)
+
+	return remoteFiles, nil
+}
+
+// populateFromSMBScan does a full recursive SMB scan to list all remote files.
+func (m *SyncManager) populateFromSMBScan(job *SyncJob) ([]cloudfiles.RemoteFileInfo, error) {
+	dataSource, err := m.createSMBDataSource(job)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create SMB data source: %w", err)
+	}
+
+	remoteFiles, err := dataSource.ListFiles(m.ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list remote files: %w", err)
+	}
+
+	return remoteFiles, nil
+}
+
+// createSMBDataSource creates a reconnectable SMB data source for hydration.
 func (m *SyncManager) createSMBDataSource(job *SyncJob) (cloudfiles.DataSource, error) {
-	// Create SMB client for this job
+	// Create initial SMB client to verify connectivity
 	smbClient, err := smb.NewSMBClientFromKeyring(job.RemoteHost, job.RemoteShare, m.logger.Named("smb"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create SMB client: %w", err)
 	}
 
-	// Connect to SMB server
 	if err := smbClient.Connect(); err != nil {
 		return nil, fmt.Errorf("failed to connect to SMB server: %w", err)
 	}
 
-	// Create adapter
-	adapter := cloudfiles.NewSMBClientAdapter(
-		&smbClientWrapper{client: smbClient},
-		job.RemotePath,
-		m.logger.Named("smb_adapter"),
+	// Wrap in reconnectable adapter that handles dropped connections
+	reconnectable := &reconnectableSMBDataSource{
+		host:       job.RemoteHost,
+		share:      job.RemoteShare,
+		remotePath: job.RemotePath,
+		client:     smbClient,
+		logger:     m.logger.Named("smb_hydration"),
+	}
+
+	return reconnectable, nil
+}
+
+// reconnectableSMBDataSource wraps an SMB client with auto-reconnection.
+// When the connection drops (EOF, reset, timeout), it creates a fresh connection.
+type reconnectableSMBDataSource struct {
+	host       string
+	share      string
+	remotePath string
+	client     *smb.SMBClient
+	logger     *zap.Logger
+}
+
+func (r *reconnectableSMBDataSource) reconnect() error {
+	// Close old connection (ignore errors)
+	if r.client != nil {
+		r.client.Disconnect()
+	}
+
+	r.logger.Info("reconnecting SMB for hydration",
+		zap.String("host", r.host),
+		zap.String("share", r.share),
 	)
 
-	return adapter, nil
+	newClient, err := smb.NewSMBClientFromKeyring(r.host, r.share, r.logger)
+	if err != nil {
+		return fmt.Errorf("failed to create SMB client: %w", err)
+	}
+	if err := newClient.Connect(); err != nil {
+		return fmt.Errorf("failed to reconnect: %w", err)
+	}
+
+	r.client = newClient
+	return nil
+}
+
+func (r *reconnectableSMBDataSource) GetFileReader(ctx context.Context, relativePath string, offset int64) (io.ReadCloser, error) {
+	wrapper := &smbClientWrapper{client: r.client}
+	adapter := cloudfiles.NewSMBClientAdapter(wrapper, r.remotePath, r.logger)
+
+	reader, err := adapter.GetFileReader(ctx, relativePath, offset)
+	if err != nil {
+		// Try reconnecting once on connection error
+		if reconnErr := r.reconnect(); reconnErr != nil {
+			return nil, fmt.Errorf("connection lost and reconnect failed: %w (original: %v)", reconnErr, err)
+		}
+		// Retry with new connection
+		wrapper = &smbClientWrapper{client: r.client}
+		adapter = cloudfiles.NewSMBClientAdapter(wrapper, r.remotePath, r.logger)
+		return adapter.GetFileReader(ctx, relativePath, offset)
+	}
+	return reader, nil
+}
+
+func (r *reconnectableSMBDataSource) ListFiles(ctx context.Context) ([]cloudfiles.RemoteFileInfo, error) {
+	wrapper := &smbClientWrapper{client: r.client}
+	adapter := cloudfiles.NewSMBClientAdapter(wrapper, r.remotePath, r.logger)
+	return adapter.ListFiles(ctx)
 }
 
 // createPlaceholderCallback creates a callback for creating placeholders.

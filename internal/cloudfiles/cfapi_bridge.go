@@ -579,16 +579,10 @@ func (b *BridgeManager) handleFetchData(req *C.CfapiBridgeRequest, handler func(
 			zap.Error(err),
 		)
 		C.CfapiBridgeTransferError(req.connectionKey, req.transferKey, req.requestKey, C.int32_t(E_FAIL))
-	} else {
-		// Signal to Windows that hydration is complete (ACK_DATA)
-		result := C.CfapiBridgeTransferComplete(req.connectionKey, req.transferKey, req.requestKey)
-		if result != C.CFAPI_BRIDGE_OK {
-			b.logger.Error("failed to signal transfer complete",
-				zap.String("path", filePath),
-				zap.Int32("result", int32(result)),
-			)
-		}
 	}
+	// No ACK_DATA needed after FETCH_DATA: TransferData with MARK_IN_SYNC
+	// on the last chunk already completes the operation.
+	// ACK_DATA (CF_OPERATION_TYPE_ACK_DATA) is only for VALIDATE_DATA callbacks.
 }
 
 // handleCancelFetch handles a CANCEL_FETCH_DATA callback.

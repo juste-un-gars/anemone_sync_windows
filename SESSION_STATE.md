@@ -2,8 +2,8 @@
 
 Ce fichier contient un index court de chaque session. Les details sont dans `sessions/session_XXX.md`.
 
-**Derniere session**: 072 (2026-02-14)
-**Phase en cours**: Stable - release v0.1.1-dev
+**Derniere session**: 073 (2026-02-15)
+**Phase en cours**: Stable - release v0.1.2-dev
 **Prochaine etape**: Tests utilisateur en conditions reelles
 
 ---
@@ -296,6 +296,10 @@ Ce fichier contient un index court de chaque session. Les details sont dans `ses
 **Status**: Done | **Phase**: Outil anemone-cleanup
 **Resume**: Outil standalone cleanup placeholders corrompus, test OK (2701 fichiers), release v0.1.1-dev | **Commit**: 2cb7296
 
+## Session 073 - 2026-02-15
+**Status**: Done | **Phase**: Fix Cloud Files critique
+**Resume**: Fix hydratation massive (scanner hashait placeholders), fix ACK_DATA incorrect, reconnexion SMB auto
+
 ---
 
 ## Prochaines etapes
@@ -305,5 +309,6 @@ Ce fichier contient un index court de chaque session. Les details sont dans `ses
 3. [x] Fix bug suppression locale
 4. [x] Fix crash GLFW fermeture avec Settings ouvert
 5. [x] Outil anemone-cleanup (placeholders corrompus)
-6. [ ] Tests utilisateur en conditions reelles
-7. [ ] Cloud Files API dehydration (Free Up Space)
+6. [x] Fix Cloud Files: scanner ne declenche plus l'hydratation des placeholders
+7. [ ] Tests utilisateur en conditions reelles
+8. [ ] Cloud Files API dehydration (Free Up Space)

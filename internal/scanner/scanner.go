@@ -310,6 +310,15 @@ func (s *Scanner) processFile(ctx context.Context, req ScanRequest, path string,
 		MTime:      metadata.MTime,
 	}
 
+	// Cloud Files placeholder: skip hashing entirely.
+	// Reading placeholder content would trigger hydration (download from remote),
+	// which defeats the purpose of Files On Demand.
+	if metadata.IsPlaceholder {
+		fileInfo.Status = StatusUnchanged
+		fileInfo.Hash = "placeholder"
+		return fileInfo, nil
+	}
+
 	// Step 1: Get existing file state from DB (using relative path)
 	dbState, err := s.getFileState(req.JobID, relPath)
 	if err != nil {

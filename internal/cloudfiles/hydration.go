@@ -76,20 +76,31 @@ func (h *HydrationHandler) HandleFetchData(ctx context.Context, info *FetchDataI
 	ctx, cancel := context.WithCancel(ctx)
 
 	// Get relative path from NormalizedPath
-	// NormalizedPath format: \<sync_root_folder>\<relative_path>
-	// e.g., \test_anemone\subdir\file.txt -> subdir/file.txt
+	// NormalizedPath format: \<path_from_volume_root>\<relative_path>
+	// e.g., for sync root D:\Anemone\backup:
+	//   \Anemone\backup\subdir\file.txt -> subdir/file.txt
+	// e.g., for sync root D:\test_anemone:
+	//   \test_anemone\subdir\file.txt -> subdir/file.txt
 	relativePath := info.FilePath
 
 	// Strip leading backslash
 	relativePath = strings.TrimPrefix(relativePath, "\\")
 	relativePath = strings.TrimPrefix(relativePath, "/")
 
-	// Strip sync root folder name from the beginning
-	syncRootFolderName := filepath.Base(h.syncRoot.Path())
-	if strings.HasPrefix(relativePath, syncRootFolderName+"\\") {
-		relativePath = relativePath[len(syncRootFolderName)+1:]
-	} else if strings.HasPrefix(relativePath, syncRootFolderName+"/") {
-		relativePath = relativePath[len(syncRootFolderName)+1:]
+	// Strip the sync root path (from volume root) from the beginning
+	// For D:\Anemone\backup, we need to strip "Anemone\backup\" (not just "backup\")
+	syncRootPath := h.syncRoot.Path()
+	volName := filepath.VolumeName(syncRootPath)
+	syncRootRelative := strings.TrimPrefix(syncRootPath, volName)
+	syncRootRelative = strings.TrimPrefix(syncRootRelative, "\\")
+	syncRootRelative = strings.TrimPrefix(syncRootRelative, "/")
+
+	if syncRootRelative != "" {
+		if strings.HasPrefix(relativePath, syncRootRelative+"\\") {
+			relativePath = relativePath[len(syncRootRelative)+1:]
+		} else if strings.HasPrefix(relativePath, syncRootRelative+"/") {
+			relativePath = relativePath[len(syncRootRelative)+1:]
+		}
 	}
 
 	// Normalize to forward slashes

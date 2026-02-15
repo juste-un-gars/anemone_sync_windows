@@ -9,12 +9,13 @@ import (
 
 // FileMetadata contains metadata about a file
 type FileMetadata struct {
-	Path      string      // Full file path
-	Size      int64       // File size in bytes
-	MTime     time.Time   // Modification time
-	IsDir     bool        // Whether it's a directory
-	IsSymlink bool        // Whether it's a symlink
-	Mode      os.FileMode // File mode/permissions
+	Path          string      // Full file path
+	Size          int64       // File size in bytes
+	MTime         time.Time   // Modification time
+	IsDir         bool        // Whether it's a directory
+	IsSymlink     bool        // Whether it's a symlink
+	IsPlaceholder bool        // Whether it's a Cloud Files placeholder (would trigger hydration)
+	Mode          os.FileMode // File mode/permissions
 }
 
 // ExtractMetadata extracts metadata from a file path using os.Stat
@@ -52,12 +53,13 @@ func ExtractMetadata(path string) (*FileMetadata, error) {
 // Useful when already have FileInfo from filepath.Walk or ReadDir
 func ExtractMetadataWithStat(path string, info os.FileInfo) *FileMetadata {
 	return &FileMetadata{
-		Path:      filepath.Clean(path),
-		Size:      info.Size(),
-		MTime:     info.ModTime(),
-		IsDir:     info.IsDir(),
-		IsSymlink: info.Mode()&os.ModeSymlink != 0,
-		Mode:      info.Mode(),
+		Path:          filepath.Clean(path),
+		Size:          info.Size(),
+		MTime:         info.ModTime(),
+		IsDir:         info.IsDir(),
+		IsSymlink:     info.Mode()&os.ModeSymlink != 0,
+		IsPlaceholder: isPlaceholderInfo(info),
+		Mode:          info.Mode(),
 	}
 }
 
